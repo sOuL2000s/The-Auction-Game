@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Grand Auction House</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="header">
+        <h1>The Grand Auction House</h1>
+    </div>
+
+    <div id="message-area" class="message-area"></div>
+
+    <div class="game-wrapper"> <!-- New wrapper for main content area -->
+        <!-- Room Selection/Creation Area -->
+        <div id="room-selection-area" class="room-selection-area">
+            <div class="welcome-section">
+                <h2>Welcome to the Auction!</h2>
+                <p>Ready to create or join a game?</p>
+            </div>
+            <div class="room-actions-section">
+                <div class="input-group">
+                    <input type="text" id="roomIdInput" placeholder="Enter Room ID to Join">
+                    <button id="joinRoomBtn" class="action-btn">Join Room</button>
+                </div>
+                <p class="or-divider">- OR -</p>
+                <button id="createRoomBtn" class="action-btn create-room-btn">Create New Room (as Auctioneer)</button>
+            </div>
+        </div>
+
+        <div class="game-container"> <!-- Existing game container for panels -->
+            <aside class="player-panel" style="display: none;" id="playerPanel">
+                <h2>Your Corner</h2>
+                <p class="current-room-display">Current Room: <span id="playerRoomIdDisplay" class="room-id"></span></p>
+
+                <div class="player-info card">
+                    <p>Player ID: <span id="playerIdDisplay" class="player-id"></span></p>
+                    <p>Your Display Name:</p>
+                    <input type="text" id="playerNameInput" placeholder="Enter your name" maxlength="20">
+                    <button id="setPlayerNameBtn" class="action-btn">Set Name</button>
+                    <p class="budget-display">Budget: $<span id="playerBudgetDisplay">0</span></p>
+                </div>
+
+                <h3>Current Auction</h3>
+                <div id="player-current-auction" class="auction-display card">
+                    <p class="item-name">Item: <span id="currentAuctionItemName">Awaiting Auction</span></p>
+                    <p class="current-bid">Current Bid: $<span id="currentAuctionBid">0</span></p>
+                    <p class="highest-bidder">Highest Bidder: <span id="currentHighestBidder">N/A</span></p>
+
+                    <div id="bid-input-area" class="bid-input-area" style="display: none;">
+                        <input type="number" id="bidAmountInput" placeholder="Your Bid" min="0">
+                        <button id="placeBidBtn" class="bid-btn">Place Bid!</button>
+                    </div>
+                </div>
+
+                <h3>Your Winnings</h3>
+                <ul id="playerWonItemsList" class="item-list card">
+                    <li class="placeholder-item">No items won yet.</li>
+                </ul>
+
+                <div class="llm-assistant-section card">
+                    <h3>AI Assistant</h3>
+                    <div id="playerLlmChat" class="llm-chat-window">
+                        <div class="llm-messages" id="playerLlmMessages">
+                            <p class="llm-message bot">Hello! Ask me anything about the auction rules or items.</p>
+                        </div>
+                        <div class="llm-input-area">
+                            <input type="text" id="playerLlmInput" placeholder="Ask the AI...">
+                            <button id="playerLlmSendBtn">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="main-auction-area" style="display: none;" id="mainAuctionArea">
+                <div id="auction-timer-display" class="auction-timer-display" style="display: none;">
+                    Bidding Ends In: <span id="timer-countdown">00:00</span>
+                </div>
+                <div class="auction-hammer-effect" id="auctionHammerEffect">
+                    <p>SOLD!</p>
+                </div>
+                <div id="central-auction-item" class="central-auction-item card">
+                    <p class="status-message" id="centralStatusMessage">Auction awaits the Auctioneer.</p>
+                </div>
+            </main>
+
+            <aside class="auctioneer-panel" style="display: none;" id="auctioneerPanel">
+                <h2>Auctioneer's Podium</h2>
+                <p class="current-room-display">Current Room: <span id="auctioneerRoomIdDisplay" class="room-id"></span></p>
+
+                <div class="game-settings card">
+                    <h3>Game Settings</h3>
+                    <label for="startingBudgetInput">Player Starting Budget:</label>
+                    <input type="number" id="startingBudgetInput" value="5000" min="100">
+
+                    <label for="bidIncrementPercentInput">Min Bid Increment (%):</label>
+                    <input type="number" id="bidIncrementPercentInput" value="5" min="1" max="100">
+
+                    <label for="auctionDurationInput">Bidding Round Duration (s):</label>
+                    <input type="number" id="auctionDurationInput" value="15" min="5" max="120">
+
+                    <button id="updateSettingsBtn" class="action-btn">Update Settings</button>
+                </div>
+
+                <div class="item-management card">
+                    <h3>Add New Treasure</h3>
+                    <input type="text" id="itemNameInput" placeholder="Item Name">
+                    <input type="number" id="itemBasePriceInput" placeholder="Base Price" min="0">
+                    <button id="addItemBtn" class="action-btn">Add Item</button>
+
+                    <h3>Batch Item Inclusion</h3>
+                    <textarea id="batchItemsInput" rows="5" placeholder="Enter items (e.g., 'Painting,1500&#10;Statue,800') or upload CSV"></textarea>
+                    <input type="file" id="batchCsvFileInput" accept=".csv">
+                    <button id="addBatchItemsBtn" class="action-btn">Add Batch Items</button>
+                </div>
+
+                <h3>Current Auction Management</h3>
+                <div id="auctioneer-current-item" class="auction-management card">
+                    <p>No item currently selected for auction.</p>
+                </div>
+                <button id="startBiddingBtn" class="action-btn" style="display: none;">Start Bidding!</button>
+                <button id="finalizeItemBtn" class="action-btn finalize-btn" style="display: none;">Finalize Auction</button>
+                <button id="clearAuctionBtn" class="action-btn clear-btn" style="display: none;">Clear Current Auction</button>
+
+                <h3>Available Items</h3>
+                <ul id="auctioneerItemsList" class="item-list card">
+                    <li class="placeholder-item">No items added yet.</li>
+                </ul>
+
+                <div class="llm-assistant-section card">
+                    <h3>AI Assistant</h3>
+                    <div id="auctioneerLlmChat" class="llm-chat-window">
+                        <div class="llm-messages" id="auctioneerLlmMessages">
+                            <p class="llm-message bot">Hello, Auctioneer! How may I assist you?</p>
+                        </div>
+                        <div class="llm-input-area">
+                            <input type="text" id="auctioneerLlmInput" placeholder="Ask the AI...">
+                            <button id="auctioneerLlmSendBtn">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </div> <!-- End .game-container -->
+    </div> <!-- End .game-wrapper -->
+
+    <audio id="bidSound" src="https://www.soundjay.com/buttons/sounds/button-2.mp3" preload="auto"></audio>
+    <audio id="hammerSound" src="https://www.soundjay.com/misc/sounds/hammer.mp3" preload="auto"></audio>
+    <script src="script.js"></script>
+</body>
+</html>

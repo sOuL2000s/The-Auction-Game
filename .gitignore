@@ -1,0 +1,12 @@
+# Node.js dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# Logs and temporary files
+*.log
+npm-debug.log*
+.DS_Store # macOS specific
+Thumbs.db # Windows specific
+package-lock.json

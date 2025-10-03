@@ -1,0 +1,744 @@
+:root {
+    --primary-bg: #1c1c1c; /* Dark charcoal */
+    --secondary-bg: #2a2a2a; /* Slightly lighter charcoal */
+    --tertiary-bg: #333; /* Even lighter for nested elements/cards */
+    --accent-gold: #c7a76c; /* Rich gold */
+    --light-text: #e0e0e0;
+    --dark-text: #333;
+    --border-color: #555;
+    --success-color: #4CAF50;
+    --error-color: #f44336;
+    --info-color: #2196F3;
+
+    --llm-bg: #3c3c3c;
+    --llm-bot-msg-bg: #4a4a4a;
+    --llm-user-msg-bg: #007bff;
+}
+
+body {
+    font-family: 'Merriweather', serif;
+    margin: 0;
+    padding: 0;
+    background-color: var(--primary-bg);
+    color: var(--light-text);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+.header {
+    width: 100%;
+    background-color: var(--secondary-bg);
+    padding: 1.2rem 0; /* Adjusted padding */
+    text-align: center;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    margin-bottom: 20px;
+}
+
+h1 {
+    font-family: 'Playfair Display', serif;
+    color: var(--accent-gold);
+    margin: 0;
+    font-size: clamp(2.5rem, 6vw, 3.5rem); /* Responsive font size */
+    letter-spacing: 2px;
+    text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.5);
+}
+
+h2, h3 {
+    font-family: 'Playfair Display', serif;
+    color: var(--accent-gold);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.6rem; /* Adjusted padding */
+    margin-top: 1.5rem; /* Adjusted margin */
+    margin-bottom: 1rem; /* Adjusted margin */
+}
+
+/* New wrapper to allow content to flex-grow */
+.game-wrapper {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 95%;
+    max-width: 1400px;
+    padding-bottom: 20px; /* Adjusted padding */
+}
+
+/* Main game panels container */
+.game-container {
+    display: flex;
+    flex-wrap: wrap; /* Allows panels to wrap on smaller screens */
+    justify-content: center;
+    gap: 1.5rem; /* Consistent gap between panels */
+    width: 100%;
+}
+
+/* Card styling for internal sections */
+.card {
+    background-color: var(--tertiary-bg); /* Slightly lighter background for cards */
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1); /* Subtle inner shadow */
+}
+
+
+/* Room Selection Area (Initial Screen) */
+.room-selection-area {
+    background-color: var(--secondary-bg);
+    padding: 2.5rem; /* More generous padding */
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    text-align: center;
+    width: 100%;
+    max-width: 600px; /* Increased max-width for better look */
+    margin: 3rem auto; /* Centered with top/bottom margin */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem; /* Space between welcome and actions section */
+}
+
+.welcome-section {
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px dashed var(--border-color);
+}
+.welcome-section h2 {
+    font-size: clamp(2rem, 5vw, 2.8rem); /* Responsive font size for welcome title */
+    margin-bottom: 0.5rem;
+    border-bottom: none; /* Remove border from H2 inside welcome */
+}
+.welcome-section p {
+    font-size: 1.1em;
+    color: #ccc;
+    margin: 0;
+}
+
+.room-actions-section {
+    width: 100%; /* Ensure it takes full width of its parent */
+    display: flex;
+    flex-direction: column; /* Stack actions vertically */
+    gap: 1rem;
+    align-items: center;
+}
+
+.room-selection-area .input-group {
+    display: flex;
+    flex-direction: column; /* Stack input and button by default for responsiveness */
+    gap: 0.5rem;
+    margin-bottom: 0.5rem; /* Adjusted margin */
+    width: 100%;
+}
+.room-selection-area .input-group input {
+    width: auto; /* Let flex handle width */
+    flex-grow: 1;
+}
+.room-selection-area .input-group button {
+    width: 100%; /* Buttons fill available width */
+    margin-right: 0; /* Remove right margin */
+}
+.room-selection-area .or-divider {
+    margin: 0.5rem 0; /* Adjusted margin */
+    font-style: italic;
+    color: #888;
+    font-size: 0.9em;
+}
+.room-selection-area .action-btn.create-room-btn {
+    width: 100%;
+    margin-top: 0;
+    padding: 1.2rem; /* Larger padding for prominence */
+    font-size: 1.1em;
+}
+
+/* General Layout for Aside and Main */
+aside, main.main-auction-area {
+    background-color: var(--secondary-bg);
+    padding: 1.5rem; /* Consistent padding */
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    flex: 1; /* Allow flexing */
+    min-width: 320px; /* Smaller min-width for mobile */
+    max-width: 480px; /* Max-width for panels */
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem; /* Consistent gap between sections within panels */
+}
+
+main.main-auction-area {
+    flex: 2; /* Main area takes more space */
+    min-width: 320px;
+    max-width: 700px; /* Larger max-width for central content */
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    padding: 2rem; /* More padding for central area */
+}
+
+
+.message-area {
+    background-color: var(--info-color);
+    color: white;
+    padding: 0.75rem 1.25rem; /* Adjusted padding */
+    border-radius: 8px;
+    margin-bottom: 1.25rem; /* Adjusted margin */
+    text-align: center;
+    width: 80%;
+    max-width: 600px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    display: none; /* Hidden by default */
+    font-weight: bold;
+    opacity: 0;
+    transform: translateY(-20px);
+    transition: opacity 0.3s ease-out, transform 0.3s ease-out, background-color 0.3s ease;
+    position: fixed;
+    top: 1.25rem; /* Adjusted top position */
+    z-index: 1000;
+}
+.message-area.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+.message-area.success { background-color: var(--success-color); }
+.message-area.error { background-color: var(--error-color); }
+
+
+/* Buttons and Inputs */
+button, input[type="text"], input[type="number"], textarea, input[type="file"] {
+    padding: 0.75rem 1rem; /* Adjusted padding */
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    font-size: 1em;
+    font-family: 'Merriweather', serif;
+}
+
+input[type="text"], input[type="number"], textarea {
+    background-color: var(--secondary-bg); /* Use secondary background for inputs */
+    color: var(--light-text);
+    width: calc(100% - 22px); /* Account for padding+border */
+    margin-bottom: 0.5rem; /* Adjusted margin */
+    transition: border-color 0.3s ease;
+}
+input[type="text"]:focus, input[type="number"]:focus, textarea:focus {
+    border-color: var(--accent-gold);
+    outline: none;
+}
+
+button {
+    background-color: var(--accent-gold);
+    color: var(--primary-bg);
+    cursor: pointer;
+    transition: background-color 0.3s ease, transform 0.1s ease;
+    font-weight: bold;
+    border: none;
+    margin-right: 0.5rem; /* Adjusted margin */
+}
+button:hover:not(:disabled) {
+    background-color: #d1b87c;
+    transform: translateY(-2px);
+}
+button:active:not(:disabled) {
+    transform: translateY(0);
+}
+button:disabled {
+    background-color: #666;
+    cursor: not-allowed;
+    color: #bbb;
+}
+
+.action-btn {
+    background-color: var(--success-color);
+    color: white;
+}
+.action-btn:hover:not(:disabled) {
+    background-color: #45a049;
+}
+.finalize-btn {
+    background-color: var(--error-color);
+}
+.finalize-btn:hover:not(:disabled) {
+    background-color: #da190b;
+}
+.clear-btn {
+    background-color: #ff9800;
+}
+.clear-btn:hover:not(:disabled) {
+    background-color: #e68a00;
+}
+.bid-btn, #setPlayerNameBtn {
+    background-color: var(--info-color);
+    color: white;
+}
+.bid-btn:hover:not(:disabled), #setPlayerNameBtn:hover:not(:disabled) {
+    background-color: #0056b3;
+}
+
+
+/* Player Specific Styles */
+.player-info {
+    /* Uses .card style */
+    border: 1px dashed var(--accent-gold); /* Dashed border for player info */
+}
+.player-info p {
+    margin: 0.3rem 0; /* Adjusted margin */
+}
+.player-id, .room-id {
+    color: var(--accent-gold);
+    font-weight: bold;
+}
+.current-room-display {
+    text-align: center;
+    font-size: 1.1em;
+    font-style: italic;
+    color: #bbb;
+    margin-bottom: 1rem;
+}
+.budget-display {
+    font-size: 1.3em;
+    font-weight: bold;
+    color: var(--success-color);
+    margin-top: 0.75rem !important;
+}
+#playerNameInput {
+    width: calc(100% - 22px);
+    margin-bottom: 0.5rem;
+}
+#setPlayerNameBtn {
+    width: 100%;
+    margin-top: 0.5rem;
+    margin-right: 0;
+}
+
+
+/* Auction Display */
+.auction-display {
+    /* Uses .card style */
+    transition: all 0.3s ease;
+}
+.auction-display .item-name {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3em; /* Slightly smaller for better fit */
+    color: var(--accent-gold);
+    margin-bottom: 0.75rem;
+}
+.auction-display .current-bid {
+    font-size: 1.8em; /* Slightly smaller */
+    font-weight: bold;
+    color: var(--success-color);
+    transition: color 0.3s ease, transform 0.3s ease;
+}
+.auction-display .current-bid.new-bid-effect {
+    color: var(--accent-gold);
+    transform: scale(1.1);
+}
+.auction-display .highest-bidder {
+    font-size: 1em; /* Adjusted font size */
+    color: var(--light-text);
+}
+
+.bid-input-area {
+    margin-top: 1rem;
+    border-top: 1px dashed var(--border-color);
+    padding-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.bid-input-area input {
+    margin-bottom: 0;
+}
+.bid-input-area button {
+    width: 100%;
+    margin-right: 0;
+}
+
+/* Item List Styles */
+.item-list {
+    list-style-type: none;
+    padding: 0;
+    max-height: 250px; /* Adjusted max height */
+    overflow-y: auto;
+    border-top: none; /* Removed redundant border-top as .card handles border */
+    padding-top: 0; /* Removed redundant padding-top */
+    margin-top: 0;
+}
+.item-list li {
+    background-color: var(--secondary-bg); /* Use secondary bg for list items */
+    margin-bottom: 0.5rem;
+    padding: 0.75rem;
+    border-radius: 6px;
+    display: flex;
+    flex-wrap: wrap; /* Allow content inside list item to wrap */
+    justify-content: space-between;
+    align-items: center;
+    border-left: 5px solid transparent;
+    transition: all 0.3s ease;
+    font-size: 0.9em;
+}
+.item-list li.placeholder-item {
+    text-align: center;
+    color: #888;
+    font-style: italic;
+    background-color: transparent;
+    padding: 1rem;
+}
+.item-list li.current-auction-item {
+    background-color: #4a4a4a;
+    border-left-color: var(--accent-gold);
+    font-weight: bold;
+    box-shadow: 0 0 10px rgba(199, 167, 108, 0.3);
+}
+.item-list li.sold-item {
+    border-left-color: var(--success-color);
+    opacity: 0.7;
+    text-decoration: line-through;
+}
+.item-list li button {
+    margin-left: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8em;
+    background-color: var(--info-color);
+    color: white;
+}
+.item-list li button:hover:not(:disabled) {
+    background-color: #0056b3;
+}
+.item-list .item-details, .item-list .item-status {
+    flex: 1 1 auto; /* Allow these spans to take space and wrap */
+    min-width: 100px; /* Ensure they have a minimum width */
+}
+.item-list li button {
+    flex-shrink: 0; /* Prevent button from shrinking */
+    margin-top: 0.5rem; /* Add margin for stacking on small screens */
+    margin-left: 0;
+    width: 100%; /* Default to full width for better touch */
+}
+@media (min-width: 600px) { /* For wider screens, make button inline */
+    .item-list li button {
+        width: auto;
+        margin-left: 0.5rem;
+        margin-top: 0;
+    }
+}
+
+
+/* Auctioneer specific styles */
+.auctioneer-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+}
+.game-settings, .item-management {
+    /* Uses .card style */
+    padding-bottom: 1rem; /* Consistent padding */
+}
+.game-settings label {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-size: 0.95em;
+    color: var(--light-text);
+}
+.game-settings input {
+    margin-bottom: 0.75rem;
+}
+.game-settings button {
+    width: 100%;
+    margin-top: 0.5rem;
+    margin-right: 0;
+}
+.auction-management {
+    /* Uses .card style */
+    margin-bottom: 0; /* No external margin, .auctioneer-controls gap handles it */
+}
+.auction-management p {
+    margin: 0.3rem 0;
+}
+#batchItemsInput {
+    resize: vertical;
+    width: calc(100% - 22px);
+    margin-bottom: 0.5rem;
+}
+#batchCsvFileInput {
+    width: calc(100% - 22px);
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.5rem;
+    background-color: var(--secondary-bg);
+    color: var(--light-text);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+}
+#batchCsvFileInput::file-selector-button {
+    background-color: var(--info-color);
+    color: white;
+    border: none;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+#batchCsvFileInput::file-selector-button:hover {
+    background-color: #0056b3;
+}
+
+
+/* Central Auction Area */
+.central-auction-item {
+    /* Uses .card style */
+    width: 100%;
+    height: 300px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    border: 2px dashed var(--accent-gold);
+    padding: 1.5rem; /* Adjusted padding */
+    margin-bottom: 1.2rem; /* Adjusted margin */
+}
+.central-auction-item .status-message {
+    font-size: clamp(1.2rem, 3vw, 1.8rem); /* Responsive font size */
+    color: #ccc;
+    font-style: italic;
+    margin-top: 1rem;
+}
+.central-auction-item h3 {
+    font-size: clamp(1.8rem, 4vw, 2.5rem); /* Responsive font size */
+    color: var(--accent-gold);
+    margin-bottom: 0.75rem;
+    border-bottom: none;
+}
+.central-auction-item p {
+    font-size: 1.1em;
+    margin: 0.3rem 0;
+}
+.central-auction-item .central-bid {
+    font-size: clamp(2.5rem, 6vw, 3.5rem); /* Responsive font size */
+    font-weight: bold;
+    color: var(--success-color);
+    transition: color 0.3s ease, transform 0.3s ease;
+    text-shadow: 0 0 10px rgba(0,255,0,0.5);
+}
+.central-auction-item .central-bid.new-bid-effect {
+    color: var(--accent-gold);
+    transform: scale(1.15);
+}
+.central-auction-item .central-highest-bidder {
+    font-size: clamp(1.1rem, 2vw, 1.5rem); /* Responsive font size */
+    color: var(--light-text);
+}
+
+
+/* Auction Timer Display */
+.auction-timer-display {
+    background-color: var(--accent-gold);
+    color: var(--primary-bg);
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(1.5rem, 4vw, 2em); /* Responsive font size */
+    font-weight: bold;
+    padding: 1rem 1.5rem;
+    border-radius: 10px;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    box-shadow: 0 0 15px rgba(199, 167, 108, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+}
+#timer-countdown {
+    min-width: 60px;
+}
+.auction-timer-display.time-low {
+    background-color: var(--error-color);
+    color: white;
+    animation: pulseRed 1s infinite alternate;
+}
+
+/* Hammer Effect */
+.auction-hammer-effect {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    background-color: var(--accent-gold);
+    color: var(--primary-bg);
+    padding: 1.25rem 2.5rem;
+    border-radius: 15px;
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2.5rem, 8vw, 4em); /* Responsive font size */
+    font-weight: bold;
+    opacity: 0;
+    transition: all 0.5s ease-out;
+    z-index: 100;
+    box-shadow: 0 0 20px rgba(199, 167, 108, 0.7);
+    white-space: nowrap;
+}
+
+.auction-hammer-effect.show {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+}
+
+/* LLM Assistant Section */
+.llm-assistant-section {
+    /* Uses .card style */
+    padding-bottom: 1rem;
+}
+.llm-assistant-section h3 {
+    color: var(--info-color);
+    border-bottom-color: #666;
+    margin-top: 0;
+    margin-bottom: 0.75rem;
+}
+.llm-chat-window {
+    display: flex;
+    flex-direction: column;
+    height: 300px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.llm-messages {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 0.75rem;
+    background-color: var(--primary-bg);
+}
+.llm-message {
+    margin: 0.3rem 0;
+    padding: 0.5rem 0.75rem;
+    border-radius: 15px;
+    max-width: 80%;
+    word-wrap: break-word;
+    font-size: 0.9em;
+}
+.llm-message.bot {
+    background-color: var(--llm-bot-msg-bg);
+    align-self: flex-start;
+    color: var(--light-text);
+}
+.llm-message.user {
+    background-color: var(--llm-user-msg-bg);
+    align-self: flex-end;
+    color: white;
+    margin-left: auto;
+}
+.llm-input-area {
+    display: flex;
+    border-top: 1px solid var(--border-color);
+    padding: 0.75rem;
+    background-color: var(--secondary-bg);
+}
+.llm-input-area input {
+    flex-grow: 1;
+    margin-bottom: 0;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    padding: 0.6rem 0.8rem;
+}
+.llm-input-area button {
+    margin-left: 0.5rem;
+    background-color: var(--info-color);
+    color: white;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    padding: 0.6rem 1rem;
+    margin-right: 0;
+}
+.llm-input-area button:hover:not(:disabled) {
+    background-color: #1a7fb3;
+}
+
+
+/* Animations */
+@keyframes pulseRed {
+    from { box-shadow: 0 0 15px rgba(244, 67, 54, 0.5); }
+    to { box-shadow: 0 0 25px rgba(244, 67, 54, 0.9); }
+}
+
+/* Scrollbar Styling */
+.item-list::-webkit-scrollbar, .llm-messages::-webkit-scrollbar {
+    width: 8px;
+}
+.item-list::-webkit-scrollbar-track, .llm-messages::-webkit-scrollbar-track {
+    background: #3c3c3c;
+    border-radius: 10px;
+}
+.item-list::-webkit-scrollbar-thumb, .llm-messages::-webkit-scrollbar-thumb {
+    background: var(--accent-gold);
+    border-radius: 10px;
+}
+.item-list::-webkit-scrollbar-thumb:hover, .llm-messages::-webkit-scrollbar-thumb:hover {
+    background: #d1b87c;
+}
+
+/* Responsive adjustments */
+@media (min-width: 768px) {
+    /* Adjust input-group for room selection on wider screens */
+    .room-selection-area .input-group {
+        flex-direction: row; /* Input and button side-by-side */
+        width: 80%; /* Don't stretch too wide */
+    }
+    .room-selection-area .input-group button {
+        width: auto; /* Shrink button */
+    }
+    .room-selection-area .action-btn.create-room-btn {
+        width: 80%;
+    }
+}
+
+@media (max-width: 1200px) {
+    .game-container {
+        flex-direction: column; /* Stack panels vertically */
+        align-items: center;
+        gap: 1.5rem; /* Consistent gap when stacked */
+    }
+    aside, main.main-auction-area {
+        max-width: 90%; /* Take more width when stacked */
+        min-width: unset;
+        width: 100%; /* Fill available space */
+    }
+}
+
+@media (max-width: 768px) {
+    h1 {
+        font-size: 2rem; /* Smaller header on very small screens */
+    }
+    aside, main.main-auction-area {
+        padding: 1rem; /* Less padding on small screens */
+        gap: 0.8rem;
+    }
+    .central-auction-item {
+        height: 250px; /* Slightly smaller central display */
+        padding: 1rem;
+    }
+    .welcome-section h2 {
+        font-size: 1.8rem;
+    }
+    .welcome-section p {
+        font-size: 0.95em;
+    }
+    .auction-timer-display {
+        font-size: 1.3em;
+        padding: 0.75rem 1rem;
+    }
+    .auction-hammer-effect {
+        font-size: 2rem;
+        padding: 1rem 2rem;
+    }
+    .message-area {
+        font-size: 0.9em;
+        width: 90%;
+        left: 5%; /* Centered horizontally */
+        transform: translateX(0); /* Reset transform */
+    }
+    .message-area.show {
+        transform: translateY(0); /* Just translateY */
+    }
+}
