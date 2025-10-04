@@ -33,8 +33,9 @@
             </div>
         </div>
 
-        <div class="game-container"> <!-- Existing game container for panels -->
-            <aside class="player-panel" style="display: none;" id="playerPanel">
+        <div class="game-container"> <!-- Main grid/flex container for panels -->
+            <!-- Player Panel (Left Column slot) -->
+            <aside class="player-panel panel" style="display: none;" id="playerPanel">
                 <h2>Your Corner</h2>
                 <p class="current-room-display">Current Room: <span id="playerRoomIdDisplay" class="room-id"></span></p>
 
@@ -77,7 +78,8 @@
                 </div>
             </aside>
 
-            <main class="main-auction-area" style="display: none;" id="mainAuctionArea">
+            <!-- Main Auction Area (Center Column slot) -->
+            <main class="main-auction-area panel" style="display: none;" id="mainAuctionArea">
                 <div id="auction-timer-display" class="auction-timer-display" style="display: none;">
                     Bidding Ends In: <span id="timer-countdown">00:00</span>
                 </div>
@@ -89,58 +91,82 @@
                 </div>
             </main>
 
-            <aside class="auctioneer-panel" style="display: none;" id="auctioneerPanel">
+            <!-- Scoreboard Panel (Right Column slot) -->
+            <aside class="scoreboard-panel panel" style="display: none;" id="scoreboardPanel">
+                <h2>Game Scoreboard</h2>
+                <div id="playerScoresContainer" class="player-scores-container card">
+                    <p class="placeholder-item">No players yet. Join a room!</p>
+                </div>
+            </aside>
+
+            <!-- Auctioneer Panel (Also occupies Left Column slot when active) -->
+            <aside class="auctioneer-panel panel" style="display: none;" id="auctioneerPanel">
                 <h2>Auctioneer's Podium</h2>
                 <p class="current-room-display">Current Room: <span id="auctioneerRoomIdDisplay" class="room-id"></span></p>
 
-                <div class="game-settings card">
-                    <h3>Game Settings</h3>
-                    <label for="startingBudgetInput">Player Starting Budget:</label>
-                    <input type="number" id="startingBudgetInput" value="5000" min="100">
+                <div class="tabs-container">
+                    <div class="tabs-nav">
+                        <button class="tab-button active" data-tab="auction-control">Auction</button>
+                        <button class="tab-button" data-tab="item-inventory">Inventory</button>
+                        <button class="tab-button" data-tab="game-settings">Settings</button>
+                        <button class="tab-button" data-tab="auctioneer-llm">AI Guide</button>
+                    </div>
 
-                    <label for="bidIncrementPercentInput">Min Bid Increment (%):</label>
-                    <input type="number" id="bidIncrementPercentInput" value="5" min="1" max="100">
-
-                    <label for="auctionDurationInput">Bidding Round Duration (s):</label>
-                    <input type="number" id="auctionDurationInput" value="15" min="5" max="120">
-
-                    <button id="updateSettingsBtn" class="action-btn">Update Settings</button>
-                </div>
-
-                <div class="item-management card">
-                    <h3>Add New Treasure</h3>
-                    <input type="text" id="itemNameInput" placeholder="Item Name">
-                    <input type="number" id="itemBasePriceInput" placeholder="Base Price" min="0">
-                    <button id="addItemBtn" class="action-btn">Add Item</button>
-
-                    <h3>Batch Item Inclusion</h3>
-                    <textarea id="batchItemsInput" rows="5" placeholder="Enter items (e.g., 'Painting,1500&#10;Statue,800') or upload CSV"></textarea>
-                    <input type="file" id="batchCsvFileInput" accept=".csv">
-                    <button id="addBatchItemsBtn" class="action-btn">Add Batch Items</button>
-                </div>
-
-                <h3>Current Auction Management</h3>
-                <div id="auctioneer-current-item" class="auction-management card">
-                    <p>No item currently selected for auction.</p>
-                </div>
-                <button id="startBiddingBtn" class="action-btn" style="display: none;">Start Bidding!</button>
-                <button id="finalizeItemBtn" class="action-btn finalize-btn" style="display: none;">Finalize Auction</button>
-                <button id="clearAuctionBtn" class="action-btn clear-btn" style="display: none;">Clear Current Auction</button>
-
-                <h3>Available Items</h3>
-                <ul id="auctioneerItemsList" class="item-list card">
-                    <li class="placeholder-item">No items added yet.</li>
-                </ul>
-
-                <div class="llm-assistant-section card">
-                    <h3>AI Assistant</h3>
-                    <div id="auctioneerLlmChat" class="llm-chat-window">
-                        <div class="llm-messages" id="auctioneerLlmMessages">
-                            <p class="llm-message bot">Hello, Auctioneer! How may I assist you?</p>
+                    <div id="auction-control" class="tab-content active">
+                        <h3>Current Auction Management</h3>
+                        <div id="auctioneer-current-item" class="auction-management card">
+                            <p>No item currently selected for auction.</p>
                         </div>
-                        <div class="llm-input-area">
-                            <input type="text" id="auctioneerLlmInput" placeholder="Ask the AI...">
-                            <button id="auctioneerLlmSendBtn">Send</button>
+                        <div class="auction-actions">
+                            <button id="startBiddingBtn" class="action-btn" style="display: none;">Start Bidding!</button>
+                            <button id="finalizeItemBtn" class="action-btn finalize-btn" style="display: none;">Finalize Auction</button>
+                            <button id="clearAuctionBtn" class="action-btn clear-btn" style="display: none;">Clear Current Auction</button>
+                        </div>
+
+                        <h3>Available Items</h3>
+                        <ul id="auctioneerItemsList" class="item-list card">
+                            <li class="placeholder-item">No items added yet.</li>
+                        </ul>
+                    </div>
+
+                    <div id="item-inventory" class="tab-content">
+                        <h3>Add New Treasure</h3>
+                        <div class="input-group">
+                            <input type="text" id="itemNameInput" placeholder="Item Name">
+                            <input type="number" id="itemBasePriceInput" placeholder="Base Price" min="0">
+                            <button id="addItemBtn" class="action-btn">Add Item</button>
+                        </div>
+
+                        <h3>Batch Item Inclusion</h3>
+                        <textarea id="batchItemsInput" rows="5" placeholder="Enter items (e.g., 'Painting,1500&#10;Statue,800') or upload CSV"></textarea>
+                        <input type="file" id="batchCsvFileInput" accept=".csv">
+                        <button id="addBatchItemsBtn" class="action-btn">Add Batch Items</button>
+                    </div>
+
+                    <div id="game-settings" class="tab-content">
+                        <h3>Game Settings</h3>
+                        <label for="startingBudgetInput">Player Starting Budget:</label>
+                        <input type="number" id="startingBudgetInput" value="5000" min="100">
+
+                        <label for="bidIncrementPercentInput">Min Bid Increment (%):</label>
+                        <input type="number" id="bidIncrementPercentInput" value="5" min="1" max="100">
+
+                        <label for="auctionDurationInput">Bidding Round Duration (s):</label>
+                        <input type="number" id="auctionDurationInput" value="15" min="5" max="120">
+
+                        <button id="updateSettingsBtn" class="action-btn">Update Settings</button>
+                    </div>
+
+                    <div id="auctioneer-llm" class="tab-content">
+                        <h3>AI Assistant</h3>
+                        <div id="auctioneerLlmChat" class="llm-chat-window">
+                            <div class="llm-messages" id="auctioneerLlmMessages">
+                                <p class="llm-message bot">Hello, Auctioneer! How may I assist you?</p>
+                            </div>
+                            <div class="llm-input-area">
+                                <input type="text" id="auctioneerLlmInput" placeholder="Ask the AI...">
+                                <button id="auctioneerLlmSendBtn">Send</button>
+                            </div>
                         </div>
                     </div>
                 </div>

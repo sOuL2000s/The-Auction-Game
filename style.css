@@ -32,7 +32,7 @@ body {
 .header {
     width: 100%;
     background-color: var(--secondary-bg);
-    padding: 1.2rem 0; /* Adjusted padding */
+    padding: 1.2rem 0;
     text-align: center;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
     margin-bottom: 20px;
@@ -42,7 +42,7 @@ h1 {
     font-family: 'Playfair Display', serif;
     color: var(--accent-gold);
     margin: 0;
-    font-size: clamp(2.5rem, 6vw, 3.5rem); /* Responsive font size */
+    font-size: clamp(2.5rem, 6vw, 3.5rem);
     letter-spacing: 2px;
     text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.5);
 }
@@ -51,9 +51,9 @@ h2, h3 {
     font-family: 'Playfair Display', serif;
     color: var(--accent-gold);
     border-bottom: 1px solid var(--border-color);
-    padding-bottom: 0.6rem; /* Adjusted padding */
-    margin-top: 1.5rem; /* Adjusted margin */
-    margin-bottom: 1rem; /* Adjusted margin */
+    padding-bottom: 0.6rem;
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
 }
 
 /* New wrapper to allow content to flex-grow */
@@ -64,42 +64,61 @@ h2, h3 {
     align-items: center;
     width: 95%;
     max-width: 1400px;
-    padding-bottom: 20px; /* Adjusted padding */
+    padding-bottom: 20px;
 }
 
-/* Main game panels container */
+/* Main game panels container (GRID for wide screens, FLEX for smaller) */
 .game-container {
-    display: flex;
-    flex-wrap: wrap; /* Allows panels to wrap on smaller screens */
-    justify-content: center;
-    gap: 1.5rem; /* Consistent gap between panels */
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr; /* Left, Center (main), Right */
+    grid-template-areas: "left-panel main-content right-panel";
+    gap: 1.5rem;
     width: 100%;
 }
 
+/* Base style for all main panels */
+.panel {
+    background-color: var(--secondary-bg);
+    padding: 1.5rem;
+    border-radius: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+    overflow-y: auto; /* Enable scrolling for individual panels if content overflows */
+    max-height: calc(100vh - 100px); /* Adjust based on header height, etc. */
+}
+
+/* Assign grid areas */
+.player-panel, .auctioneer-panel { grid-area: left-panel; }
+.main-auction-area { grid-area: main-content; }
+.scoreboard-panel { grid-area: right-panel; }
+
+
 /* Card styling for internal sections */
 .card {
-    background-color: var(--tertiary-bg); /* Slightly lighter background for cards */
+    background-color: var(--tertiary-bg);
     padding: 1rem;
     border-radius: 8px;
     border: 1px solid var(--border-color);
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1); /* Subtle inner shadow */
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 
 /* Room Selection Area (Initial Screen) */
 .room-selection-area {
     background-color: var(--secondary-bg);
-    padding: 2.5rem; /* More generous padding */
+    padding: 2.5rem;
     border-radius: 10px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
     text-align: center;
     width: 100%;
-    max-width: 600px; /* Increased max-width for better look */
-    margin: 3rem auto; /* Centered with top/bottom margin */
+    max-width: 600px;
+    margin: 3rem auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1.5rem; /* Space between welcome and actions section */
+    gap: 1.5rem;
 }
 
 .welcome-section {
@@ -108,9 +127,9 @@ h2, h3 {
     border-bottom: 1px dashed var(--border-color);
 }
 .welcome-section h2 {
-    font-size: clamp(2rem, 5vw, 2.8rem); /* Responsive font size for welcome title */
+    font-size: clamp(2rem, 5vw, 2.8rem);
     margin-bottom: 0.5rem;
-    border-bottom: none; /* Remove border from H2 inside welcome */
+    border-bottom: none;
 }
 .welcome-section p {
     font-size: 1.1em;
@@ -119,30 +138,30 @@ h2, h3 {
 }
 
 .room-actions-section {
-    width: 100%; /* Ensure it takes full width of its parent */
+    width: 100%;
     display: flex;
-    flex-direction: column; /* Stack actions vertically */
+    flex-direction: column;
     gap: 1rem;
     align-items: center;
 }
 
 .room-selection-area .input-group {
     display: flex;
-    flex-direction: column; /* Stack input and button by default for responsiveness */
+    flex-direction: column;
     gap: 0.5rem;
-    margin-bottom: 0.5rem; /* Adjusted margin */
+    margin-bottom: 0.5rem;
     width: 100%;
 }
 .room-selection-area .input-group input {
-    width: auto; /* Let flex handle width */
+    width: auto;
     flex-grow: 1;
 }
 .room-selection-area .input-group button {
-    width: 100%; /* Buttons fill available width */
-    margin-right: 0; /* Remove right margin */
+    width: 100%;
+    margin-right: 0;
 }
 .room-selection-area .or-divider {
-    margin: 0.5rem 0; /* Adjusted margin */
+    margin: 0.5rem 0;
     font-style: italic;
     color: #888;
     font-size: 0.9em;
@@ -150,53 +169,28 @@ h2, h3 {
 .room-selection-area .action-btn.create-room-btn {
     width: 100%;
     margin-top: 0;
-    padding: 1.2rem; /* Larger padding for prominence */
+    padding: 1.2rem;
     font-size: 1.1em;
 }
 
-/* General Layout for Aside and Main */
-aside, main.main-auction-area {
-    background-color: var(--secondary-bg);
-    padding: 1.5rem; /* Consistent padding */
-    border-radius: 10px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-    flex: 1; /* Allow flexing */
-    min-width: 320px; /* Smaller min-width for mobile */
-    max-width: 480px; /* Max-width for panels */
-    display: flex;
-    flex-direction: column;
-    gap: 1.2rem; /* Consistent gap between sections within panels */
-}
-
-main.main-auction-area {
-    flex: 2; /* Main area takes more space */
-    min-width: 320px;
-    max-width: 700px; /* Larger max-width for central content */
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
-    padding: 2rem; /* More padding for central area */
-}
-
-
+/* Message Area */
 .message-area {
     background-color: var(--info-color);
     color: white;
-    padding: 0.75rem 1.25rem; /* Adjusted padding */
+    padding: 0.75rem 1.25rem;
     border-radius: 8px;
-    margin-bottom: 1.25rem; /* Adjusted margin */
+    margin-bottom: 1.25rem;
     text-align: center;
     width: 80%;
     max-width: 600px;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-    display: none; /* Hidden by default */
+    display: none;
     font-weight: bold;
     opacity: 0;
     transform: translateY(-20px);
     transition: opacity 0.3s ease-out, transform 0.3s ease-out, background-color 0.3s ease;
     position: fixed;
-    top: 1.25rem; /* Adjusted top position */
+    top: 1.25rem;
     z-index: 1000;
 }
 .message-area.show {
@@ -209,7 +203,7 @@ main.main-auction-area {
 
 /* Buttons and Inputs */
 button, input[type="text"], input[type="number"], textarea, input[type="file"] {
-    padding: 0.75rem 1rem; /* Adjusted padding */
+    padding: 0.75rem 1rem;
     border-radius: 6px;
     border: 1px solid var(--border-color);
     font-size: 1em;
@@ -217,10 +211,10 @@ button, input[type="text"], input[type="number"], textarea, input[type="file"] {
 }
 
 input[type="text"], input[type="number"], textarea {
-    background-color: var(--secondary-bg); /* Use secondary background for inputs */
+    background-color: var(--secondary-bg);
     color: var(--light-text);
-    width: calc(100% - 22px); /* Account for padding+border */
-    margin-bottom: 0.5rem; /* Adjusted margin */
+    width: calc(100% - 22px);
+    margin-bottom: 0.5rem;
     transition: border-color 0.3s ease;
 }
 input[type="text"]:focus, input[type="number"]:focus, textarea:focus {
@@ -235,7 +229,7 @@ button {
     transition: background-color 0.3s ease, transform 0.1s ease;
     font-weight: bold;
     border: none;
-    margin-right: 0.5rem; /* Adjusted margin */
+    margin-right: 0.5rem;
 }
 button:hover:not(:disabled) {
     background-color: #d1b87c;
@@ -280,11 +274,10 @@ button:disabled {
 
 /* Player Specific Styles */
 .player-info {
-    /* Uses .card style */
-    border: 1px dashed var(--accent-gold); /* Dashed border for player info */
+    border: 1px dashed var(--accent-gold);
 }
 .player-info p {
-    margin: 0.3rem 0; /* Adjusted margin */
+    margin: 0.3rem 0;
 }
 .player-id, .room-id {
     color: var(--accent-gold);
@@ -316,17 +309,16 @@ button:disabled {
 
 /* Auction Display */
 .auction-display {
-    /* Uses .card style */
     transition: all 0.3s ease;
 }
 .auction-display .item-name {
     font-family: 'Playfair Display', serif;
-    font-size: 1.3em; /* Slightly smaller for better fit */
+    font-size: 1.3em;
     color: var(--accent-gold);
     margin-bottom: 0.75rem;
 }
 .auction-display .current-bid {
-    font-size: 1.8em; /* Slightly smaller */
+    font-size: 1.8em;
     font-weight: bold;
     color: var(--success-color);
     transition: color 0.3s ease, transform 0.3s ease;
@@ -336,7 +328,7 @@ button:disabled {
     transform: scale(1.1);
 }
 .auction-display .highest-bidder {
-    font-size: 1em; /* Adjusted font size */
+    font-size: 1em;
     color: var(--light-text);
 }
 
@@ -360,19 +352,18 @@ button:disabled {
 .item-list {
     list-style-type: none;
     padding: 0;
-    max-height: 250px; /* Adjusted max height */
+    max-height: 250px;
     overflow-y: auto;
-    border-top: none; /* Removed redundant border-top as .card handles border */
-    padding-top: 0; /* Removed redundant padding-top */
+    padding-top: 0;
     margin-top: 0;
 }
 .item-list li {
-    background-color: var(--secondary-bg); /* Use secondary bg for list items */
+    background-color: var(--secondary-bg);
     margin-bottom: 0.5rem;
     padding: 0.75rem;
     border-radius: 6px;
     display: flex;
-    flex-wrap: wrap; /* Allow content inside list item to wrap */
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
     border-left: 5px solid transparent;
@@ -408,16 +399,16 @@ button:disabled {
     background-color: #0056b3;
 }
 .item-list .item-details, .item-list .item-status {
-    flex: 1 1 auto; /* Allow these spans to take space and wrap */
-    min-width: 100px; /* Ensure they have a minimum width */
+    flex: 1 1 auto;
+    min-width: 100px;
 }
 .item-list li button {
-    flex-shrink: 0; /* Prevent button from shrinking */
-    margin-top: 0.5rem; /* Add margin for stacking on small screens */
+    flex-shrink: 0;
+    margin-top: 0.5rem;
     margin-left: 0;
-    width: 100%; /* Default to full width for better touch */
+    width: 100%;
 }
-@media (min-width: 600px) { /* For wider screens, make button inline */
+@media (min-width: 600px) {
     .item-list li button {
         width: auto;
         margin-left: 0.5rem;
@@ -427,15 +418,88 @@ button:disabled {
 
 
 /* Auctioneer specific styles */
-.auctioneer-controls {
+.auctioneer-panel .current-room-display {
+    margin-bottom: 0.5rem; /* Tighter spacing above tabs */
+}
+
+.tabs-container {
     display: flex;
     flex-direction: column;
-    gap: 1.2rem;
+    flex-grow: 1; /* Allow content to grow */
 }
-.game-settings, .item-management {
-    /* Uses .card style */
-    padding-bottom: 1rem; /* Consistent padding */
+
+.tabs-nav {
+    display: flex;
+    justify-content: space-around;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 1rem;
+    padding-bottom: 0; /* No padding at bottom of nav */
 }
+
+.tab-button {
+    flex-grow: 1;
+    background-color: transparent;
+    color: #aaa;
+    border: none;
+    border-bottom: 3px solid transparent;
+    padding: 0.75rem 0.5rem;
+    font-size: 0.95em;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: 0; /* Remove default button margin */
+    border-radius: 0; /* Remove default button border-radius */
+}
+
+.tab-button:hover:not(.active) {
+    color: var(--light-text);
+    border-bottom-color: #888;
+    transform: translateY(-1px);
+}
+
+.tab-button.active {
+    color: var(--accent-gold);
+    border-bottom-color: var(--accent-gold);
+    background-color: var(--tertiary-bg);
+    transform: translateY(0);
+}
+
+.tab-content {
+    display: none;
+    flex-grow: 1; /* Allow content to grow */
+    overflow-y: auto; /* Enable scrolling for tab content */
+    max-height: calc(100% - 60px); /* Adjust based on tab nav height */
+    padding-top: 0.5rem;
+}
+
+.tab-content.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.auction-management, .game-settings, .item-management, .llm-assistant-section {
+    /* Uses .card style, remove explicit bottom padding as tab-content padding handles it */
+    padding-bottom: 1rem;
+    margin-bottom: 0.8rem; /* Consistent spacing between card sections */
+}
+
+.auction-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 0.8rem;
+    margin-bottom: 1rem;
+}
+.auction-actions button {
+    flex-grow: 1;
+    min-width: 120px;
+    margin-right: 0; /* Remove default button margin */
+}
+
 .game-settings label {
     display: block;
     margin-bottom: 0.3rem;
@@ -449,10 +513,6 @@ button:disabled {
     width: 100%;
     margin-top: 0.5rem;
     margin-right: 0;
-}
-.auction-management {
-    /* Uses .card style */
-    margin-bottom: 0; /* No external margin, .auctioneer-controls gap handles it */
 }
 .auction-management p {
     margin: 0.3rem 0;
@@ -488,27 +548,34 @@ button:disabled {
 
 
 /* Central Auction Area */
+.main-auction-area {
+    display: flex; /* Ensure it's flexed by default */
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    padding: 2rem;
+}
 .central-auction-item {
-    /* Uses .card style */
     width: 100%;
-    height: 300px;
+    min-height: 300px; /* Ensure minimum size */
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
     border: 2px dashed var(--accent-gold);
-    padding: 1.5rem; /* Adjusted padding */
-    margin-bottom: 1.2rem; /* Adjusted margin */
+    padding: 1.5rem;
+    margin-bottom: 1.2rem;
 }
 .central-auction-item .status-message {
-    font-size: clamp(1.2rem, 3vw, 1.8rem); /* Responsive font size */
+    font-size: clamp(1.2rem, 3vw, 1.8rem);
     color: #ccc;
     font-style: italic;
     margin-top: 1rem;
 }
 .central-auction-item h3 {
-    font-size: clamp(1.8rem, 4vw, 2.5rem); /* Responsive font size */
+    font-size: clamp(1.8rem, 4vw, 2.5rem);
     color: var(--accent-gold);
     margin-bottom: 0.75rem;
     border-bottom: none;
@@ -518,7 +585,7 @@ button:disabled {
     margin: 0.3rem 0;
 }
 .central-auction-item .central-bid {
-    font-size: clamp(2.5rem, 6vw, 3.5rem); /* Responsive font size */
+    font-size: clamp(2.5rem, 6vw, 3.5rem);
     font-weight: bold;
     color: var(--success-color);
     transition: color 0.3s ease, transform 0.3s ease;
@@ -529,7 +596,7 @@ button:disabled {
     transform: scale(1.15);
 }
 .central-auction-item .central-highest-bidder {
-    font-size: clamp(1.1rem, 2vw, 1.5rem); /* Responsive font size */
+    font-size: clamp(1.1rem, 2vw, 1.5rem);
     color: var(--light-text);
 }
 
@@ -539,7 +606,7 @@ button:disabled {
     background-color: var(--accent-gold);
     color: var(--primary-bg);
     font-family: 'Playfair Display', serif;
-    font-size: clamp(1.5rem, 4vw, 2em); /* Responsive font size */
+    font-size: clamp(1.5rem, 4vw, 2em);
     font-weight: bold;
     padding: 1rem 1.5rem;
     border-radius: 10px;
@@ -571,7 +638,7 @@ button:disabled {
     padding: 1.25rem 2.5rem;
     border-radius: 15px;
     font-family: 'Playfair Display', serif;
-    font-size: clamp(2.5rem, 8vw, 4em); /* Responsive font size */
+    font-size: clamp(2.5rem, 8vw, 4em);
     font-weight: bold;
     opacity: 0;
     transition: all 0.5s ease-out;
@@ -587,8 +654,10 @@ button:disabled {
 
 /* LLM Assistant Section */
 .llm-assistant-section {
-    /* Uses .card style */
     padding-bottom: 1rem;
+    flex-grow: 1; /* Allow LLM section to take available height */
+    display: flex;
+    flex-direction: column;
 }
 .llm-assistant-section h3 {
     color: var(--info-color);
@@ -599,10 +668,11 @@ button:disabled {
 .llm-chat-window {
     display: flex;
     flex-direction: column;
-    height: 300px;
+    height: 300px; /* Default height, can flex-grow if needed */
     border: 1px solid var(--border-color);
     border-radius: 6px;
     overflow: hidden;
+    flex-grow: 1; /* Allow chat window to grow */
 }
 .llm-messages {
     flex-grow: 1;
@@ -634,6 +704,7 @@ button:disabled {
     border-top: 1px solid var(--border-color);
     padding: 0.75rem;
     background-color: var(--secondary-bg);
+    flex-shrink: 0;
 }
 .llm-input-area input {
     flex-grow: 1;
@@ -656,6 +727,99 @@ button:disabled {
 }
 
 
+/* Scoreboard Panel */
+.scoreboard-panel {
+    display: flex;
+    flex-direction: column;
+}
+
+.scoreboard-panel h2 {
+    color: var(--info-color);
+    border-bottom-color: #666;
+}
+
+.player-scores-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    max-height: 100%; /* Take full height of parent panel */
+}
+
+.player-score-card {
+    background-color: var(--tertiary-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease-in-out;
+}
+
+.player-score-card.current-player-score {
+    border-left: 5px solid var(--accent-gold);
+    box-shadow: 0 0 10px rgba(199, 167, 108, 0.3), inset 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.player-score-card h4 {
+    font-family: 'Playfair Display', serif;
+    color: var(--light-text);
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    font-size: 1.2em;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+}
+
+.player-budget-score {
+    font-size: 0.8em;
+    color: #999;
+}
+
+.player-score-card p {
+    margin: 0;
+    font-size: 0.95em;
+    color: #ccc;
+}
+
+.player-score-card .total-won-value {
+    font-weight: bold;
+    color: var(--success-color);
+    font-size: 1.1em;
+}
+
+.player-winnings-list {
+    list-style-type: none;
+    padding-left: 0;
+    margin-top: 0.5rem;
+    border-top: 1px dashed #444;
+    padding-top: 0.5rem;
+}
+
+.player-winnings-list li {
+    font-size: 0.85em;
+    color: #bbb;
+    margin-bottom: 0.3rem;
+    display: flex;
+    justify-content: space-between;
+}
+.player-winnings-list .item-name {
+    font-weight: normal;
+    color: #e0e0e0;
+}
+.player-winnings-list .item-price {
+    color: var(--accent-gold);
+    font-weight: bold;
+}
+.player-winnings-list .placeholder-item-small {
+    font-style: italic;
+    color: #888;
+    text-align: center;
+    width: 100%;
+    margin-top: 0.5rem;
+}
+
+
 /* Animations */
 @keyframes pulseRed {
     from { box-shadow: 0 0 15px rgba(244, 67, 54, 0.5); }
@@ -663,59 +827,61 @@ button:disabled {
 }
 
 /* Scrollbar Styling */
-.item-list::-webkit-scrollbar, .llm-messages::-webkit-scrollbar {
+.item-list::-webkit-scrollbar, .llm-messages::-webkit-scrollbar, .player-scores-container::-webkit-scrollbar, .tab-content::-webkit-scrollbar {
     width: 8px;
 }
-.item-list::-webkit-scrollbar-track, .llm-messages::-webkit-scrollbar-track {
+.item-list::-webkit-scrollbar-track, .llm-messages::-webkit-scrollbar-track, .player-scores-container::-webkit-scrollbar-track, .tab-content::-webkit-scrollbar-track {
     background: #3c3c3c;
     border-radius: 10px;
 }
-.item-list::-webkit-scrollbar-thumb, .llm-messages::-webkit-scrollbar-thumb {
+.item-list::-webkit-scrollbar-thumb, .llm-messages::-webkit-scrollbar-thumb, .player-scores-container::-webkit-scrollbar-thumb, .tab-content::-webkit-scrollbar-thumb {
     background: var(--accent-gold);
     border-radius: 10px;
 }
-.item-list::-webkit-scrollbar-thumb:hover, .llm-messages::-webkit-scrollbar-thumb:hover {
+.item-list::-webkit-scrollbar-thumb:hover, .llm-messages::-webkit-scrollbar-thumb:hover, .player-scores-container::-webkit-scrollbar-thumb:hover, .tab-content::-webkit-scrollbar-thumb:hover {
     background: #d1b87c;
 }
 
 /* Responsive adjustments */
-@media (min-width: 768px) {
-    /* Adjust input-group for room selection on wider screens */
-    .room-selection-area .input-group {
-        flex-direction: row; /* Input and button side-by-side */
-        width: 80%; /* Don't stretch too wide */
-    }
-    .room-selection-area .input-group button {
-        width: auto; /* Shrink button */
-    }
-    .room-selection-area .action-btn.create-room-btn {
-        width: 80%;
-    }
-}
-
 @media (max-width: 1200px) {
     .game-container {
-        flex-direction: column; /* Stack panels vertically */
+        grid-template-columns: 1fr; /* Single column layout */
+        grid-template-areas:
+            "left-panel"
+            "main-content"
+            "right-panel";
         align-items: center;
-        gap: 1.5rem; /* Consistent gap when stacked */
+        justify-content: center;
+        width: 100%;
     }
-    aside, main.main-auction-area {
+
+    .panel {
         max-width: 90%; /* Take more width when stacked */
         min-width: unset;
         width: 100%; /* Fill available space */
+        max-height: unset; /* Remove fixed max-height when stacked */
+    }
+
+    /* Order when stacked: Player/Auctioneer, Main Auction, Scoreboard */
+    .player-panel, .auctioneer-panel { order: 1; }
+    .main-auction-area { order: 2; }
+    .scoreboard-panel { order: 3; }
+
+    .auctioneer-panel .tab-content {
+        max-height: 400px; /* Give tab content a max height for scrolling when stacked */
     }
 }
 
 @media (max-width: 768px) {
     h1 {
-        font-size: 2rem; /* Smaller header on very small screens */
+        font-size: 2rem;
     }
-    aside, main.main-auction-area {
-        padding: 1rem; /* Less padding on small screens */
+    .panel {
+        padding: 1rem;
         gap: 0.8rem;
     }
     .central-auction-item {
-        height: 250px; /* Slightly smaller central display */
+        min-height: 250px;
         padding: 1rem;
     }
     .welcome-section h2 {
@@ -735,10 +901,14 @@ button:disabled {
     .message-area {
         font-size: 0.9em;
         width: 90%;
-        left: 5%; /* Centered horizontally */
-        transform: translateX(0); /* Reset transform */
+        left: 5%;
+        transform: translateX(0);
     }
     .message-area.show {
-        transform: translateY(0); /* Just translateY */
+        transform: translateY(0);
+    }
+    .tab-button {
+        padding: 0.5rem 0.2rem;
+        font-size: 0.85em;
     }
 }
