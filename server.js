@@ -65,7 +65,6 @@ let GoogleGenerativeAI;
         return {
             items: [],
             players: {}, // Stores player objects, including their WebSocket (ws) reference
-            auctioneerWsId: null, // Stores the ws.id of the current auctioneer
             currentAuctionItem: null,
             currentHighestBid: 0,
             currentHighestBidder: null,
@@ -292,9 +291,9 @@ let GoogleGenerativeAI;
 
     // --- WebSocket Connection Handling ---
     wss.on('connection', ws => {
-        ws.id = uuidv4();
+        ws.id = uuidv4(); // Unique ID for this WebSocket connection
         ws.roomId = null;
-        ws.playerId = null; // Storing player ID on the WS object for easy lookup
+        ws.playerId = null; // In-game player ID (uuidv4 for the game entity)
         ws.role = 'guest';
         console.log(`Client ${ws.id} connected`);
 
@@ -302,20 +301,21 @@ let GoogleGenerativeAI;
 
         ws.on('message', async message => {
             const data = JSON.parse(message);
-            console.log(`Received from ${ws.id} (Role: ${ws.role}, Room: ${ws.roomId}):`, data);
+            console.log(`Received from ${ws.id} (Role: ${ws.role}, Room: ${ws.roomId}, PlayerId: ${ws.playerId}):`, data);
 
             switch (data.type) {
                 case 'create_room':
                     if (ws.roomId) return sendToClient(ws, { type: 'error', message: 'You are already in a room. Leave first to create a new one.' });
 
                     const newRoomId = generateRoomId();
+                    ws.playerId = uuidv4(); // Generate player ID for auctioneer
                     gameRooms[newRoomId] = {
                         gameState: createNewGameState(),
-                        auctioneerWsId: ws.id,
+                        auctioneerPlayerId: ws.playerId, // Stores the auctioneer's in-game ID
+                        activeAuctioneerWsId: ws.id,    // Stores the active WebSocket ID
                     };
                     ws.roomId = newRoomId;
                     ws.role = 'auctioneer';
-                    ws.playerId = uuidv4(); // Assign a player ID to the auctioneer
 
                     const newAuctioneerPlayer = {
                         playerId: ws.playerId,
@@ -326,11 +326,11 @@ let GoogleGenerativeAI;
                     };
                     gameRooms[newRoomId].gameState.players[ws.playerId] = newAuctioneerPlayer;
 
-                    sendToClient(ws, { type: 'room_created', roomId: newRoomId });
+                    sendToClient(ws, { type: 'room_created', roomId: newRoomId, playerId: ws.playerId }); // Send player ID to client
                     sendToClient(ws, { type: 'joined_room', roomId: newRoomId, role: 'auctioneer', playerId: ws.playerId, playerName: newAuctioneerPlayer.name, budget: newAuctioneerPlayer.budget });
                     broadcastToRoom(newRoomId, { type: 'info', message: `Auction Room "${newRoomId}" created by Auctioneer ${newAuctioneerPlayer.name}.` });
                     broadcastToRoom(newRoomId, { type: 'auction_state_update', state: gameRooms[newRoomId].gameState });
-                    console.log(`Room ${newRoomId} created by ${ws.id}`);
+                    console.log(`Room ${newRoomId} created by ${ws.id} (Player ID: ${ws.playerId})`);
                     return;
 
                 case 'join_room':
@@ -342,7 +342,7 @@ let GoogleGenerativeAI;
 
                     ws.roomId = targetRoomId;
                     ws.role = 'player';
-                    ws.playerId = uuidv4();
+                    ws.playerId = uuidv4(); // Generate player ID for regular player
 
                     const newPlayer = {
                         playerId: ws.playerId,
@@ -362,13 +362,14 @@ let GoogleGenerativeAI;
                 case 'reconnect_session':
                     if (data.roomId && gameRooms[data.roomId]) {
                         const room = gameRooms[data.roomId];
-                        if (data.role === 'auctioneer' && room.auctioneerWsId === data.playerId) { // Auctioneer's player ID is their original WS ID for consistency
+                        // Reconnect Auctioneer
+                        if (data.role === 'auctioneer' && room.auctioneerPlayerId === data.playerId) {
                             ws.roomId = data.roomId;
                             ws.role = 'auctioneer';
-                            ws.playerId = data.playerId;
+                            ws.playerId = data.playerId; // Ensure WS object has correct player ID
                             if (room.gameState.players[ws.playerId]) {
-                                room.gameState.players[ws.playerId].ws = ws;
-                                room.auctioneerWsId = ws.id; // Update auctioneer's live WS ID
+                                room.gameState.players[ws.playerId].ws = ws; // Update player's WS reference
+                                room.activeAuctioneerWsId = ws.id; // Update room's active auctioneer WS ID
                                 sendToClient(ws, {
                                     type: 'reconnected_session',
                                     roomId: ws.roomId,
@@ -379,17 +380,18 @@ let GoogleGenerativeAI;
                                 });
                                 broadcastToRoom(ws.roomId, { type: 'info', message: `Auctioneer ${room.gameState.players[ws.playerId].name} reconnected.` });
                                 broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: room.gameState });
-                                console.log(`Client ${ws.id} reconnected to room ${ws.roomId} as AUCTIONEER.`);
+                                console.log(`Client ${ws.id} reconnected to room ${ws.roomId} as AUCTIONEER (Player ID: ${ws.playerId}).`);
                             } else {
                                 console.log(`Reconnect failed: Auctioneer player data missing for ${data.playerId}.`);
                                 sendToClient(ws, { type: 'error', message: 'Reconnect failed: Auctioneer session data corrupted. Please create a new room.' });
                             }
                         }
-                        else if (data.role === 'player' && room.gameState.players[data.playerId]) { // Use data.playerId for player lookup
+                        // Reconnect Regular Player
+                        else if (data.role === 'player' && room.gameState.players[data.playerId]) {
                             ws.roomId = data.roomId;
                             ws.role = 'player';
-                            ws.playerId = data.playerId; // Player's player ID is from localStorage
-                            room.gameState.players[ws.playerId].ws = ws;
+                            ws.playerId = data.playerId; // Ensure WS object has correct player ID
+                            room.gameState.players[ws.playerId].ws = ws; // Update player's WS reference
                             if (data.playerName) room.gameState.players[ws.playerId].name = data.playerName;
                             sendToClient(ws, {
                                 type: 'reconnected_session',
@@ -401,10 +403,10 @@ let GoogleGenerativeAI;
                             });
                             broadcastToRoom(ws.roomId, { type: 'info', message: `Player ${room.gameState.players[ws.playerId].name} reconnected.` });
                             broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: room.gameState });
-                            console.log(`Client ${ws.id} reconnected to room ${ws.roomId} as PLAYER ${ws.playerId}.`);
+                            console.log(`Client ${ws.id} reconnected to room ${ws.roomId} as PLAYER (Player ID: ${ws.playerId}).`);
                         } else {
                              sendToClient(ws, { type: 'error', message: 'Reconnect failed. Session data mismatch or invalid.' });
-                             console.log(`Client ${ws.id} failed to reconnect to room ${data.roomId}.`);
+                             console.log(`Client ${ws.id} failed to reconnect to room ${data.roomId} with Player ID ${data.playerId}.`);
                         }
                     } else {
                         sendToClient(ws, { type: 'error', message: 'Reconnect failed. Room not found or invalid session.' });
@@ -421,7 +423,6 @@ let GoogleGenerativeAI;
 
             switch (data.type) {
                 case 'set_player_name':
-                    // Check if the actual websocket's player ID matches the one sent in the data for security
                     if (ws.playerId !== data.playerId || !currentGameState.players[data.playerId]) {
                         return sendToClient(ws, { type: 'error', message: 'Invalid player for this action.' });
                     }
@@ -429,12 +430,12 @@ let GoogleGenerativeAI;
                         return sendToClient(ws, { type: 'error', message: 'Player name cannot be empty.' });
                     }
                     currentGameState.players[data.playerId].name = data.name.trim().substring(0, 20);
-                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState }); // Broadcast full state to update all UIs
+                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState });
                     sendToClient(ws, { type: 'info', message: `Your display name is now "${currentGameState.players[data.playerId].name}".` });
                     break;
 
                 case 'update_settings':
-                    if (ws.id !== currentRoom.auctioneerWsId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can update game settings.' });
+                    if (ws.playerId !== currentRoom.auctioneerPlayerId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can update game settings.' });
 
                     const { playerStartingBudget, minBidIncrementPercentage, auctionRoundDuration } = data.settings;
 
@@ -449,12 +450,12 @@ let GoogleGenerativeAI;
                     currentGameState.gameSettings.auctionRoundDuration = auctionRoundDuration;
 
                     broadcastToRoom(ws.roomId, { type: 'settings_updated', settings: currentGameState.gameSettings });
-                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState }); // Also send full state update
+                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState });
                     console.log(`Room ${ws.roomId}: Game settings updated:`, currentGameState.gameSettings);
                     break;
 
                 case 'add_item':
-                    if (ws.id !== currentRoom.auctioneerWsId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can add items.' });
+                    if (ws.playerId !== currentRoom.auctioneerPlayerId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can add items.' });
                     if (!data.name || isNaN(data.basePrice) || data.basePrice < 0) return sendToClient(ws, { type: 'error', message: 'Invalid item details.' });
 
                     const newItem = {
@@ -465,11 +466,11 @@ let GoogleGenerativeAI;
                     };
                     currentGameState.items.push(newItem);
                     broadcastToRoom(ws.roomId, { type: 'item_added', item: newItem, items: currentGameState.items });
-                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState }); // Also send full state update
+                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState });
                     break;
 
                 case 'add_batch_items':
-                    if (ws.id !== currentRoom.auctioneerWsId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can add items in batch.' });
+                    if (ws.playerId !== currentRoom.auctioneerPlayerId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can add items in batch.' });
                     if (!data.items || !Array.isArray(data.items) || data.items.length === 0) return sendToClient(ws, { type: 'error', message: 'No valid items provided for batch inclusion.' });
 
                     let addedCount = 0;
@@ -488,11 +489,11 @@ let GoogleGenerativeAI;
                         }
                     });
                     broadcastToRoom(ws.roomId, { type: 'batch_items_added', count: addedCount, items: currentGameState.items });
-                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState }); // Also send full state update
+                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState });
                     break;
 
                 case 'select_item_for_auction':
-                    if (ws.id !== currentRoom.auctioneerWsId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can select items.' });
+                    if (ws.playerId !== currentRoom.auctioneerPlayerId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can select items.' });
                     if (currentGameState.auctionState !== 'idle') {
                         return sendToClient(ws, { type: 'error', message: 'An auction is already in progress. Finalize or clear it first.' });
                     }
@@ -512,7 +513,7 @@ let GoogleGenerativeAI;
                     break;
 
                 case 'start_bidding':
-                    if (ws.id !== currentRoom.auctioneerWsId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can start bidding.' });
+                    if (ws.playerId !== currentRoom.auctioneerPlayerId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can start bidding.' });
                     if (currentGameState.auctionState !== 'item_selected' || !currentGameState.currentAuctionItem) {
                         return sendToClient(ws, { type: 'error', message: 'No item selected or bidding already started.' });
                     }
@@ -523,12 +524,12 @@ let GoogleGenerativeAI;
                     break;
 
                 case 'finalize_item':
-                    if (ws.id !== currentRoom.auctioneerWsId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can finalize items.' });
+                    if (ws.playerId !== currentRoom.auctioneerPlayerId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can finalize items.' });
                     finalizeCurrentAuction(ws.roomId, false);
                     break;
 
                 case 'clear_auction':
-                    if (ws.id !== currentRoom.auctioneerWsId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can clear the auction.' });
+                    if (ws.playerId !== currentRoom.auctioneerPlayerId) return sendToClient(ws, { type: 'error', message: 'Only the auctioneer can clear the auction.' });
 
                     stopAuctionTimer(ws.roomId);
 
@@ -540,9 +541,9 @@ let GoogleGenerativeAI;
                         if (currentGameState.currentHighestBidder && currentGameState.players[currentGameState.currentHighestBidder] && currentGameState.auctionState === 'bidding') {
                              const player = currentGameState.players[currentGameState.currentHighestBidder];
                             if (player.ws && player.ws.readyState === WebSocket.OPEN) {
-                                player.budget += currentGameState.currentHighestBid; // Refund the bid
+                                player.budget += currentGameState.currentHighestBid;
                                 sendToClient(player.ws, {
-                                    type: 'player_bid_update', // Re-use this type for budget update, but without bid animation
+                                    type: 'player_bid_update',
                                     playerBudget: player.budget,
                                     message: `Auction for "${currentGameState.currentAuctionItem.name}" cleared. Your bid refunded.`,
                                     success: true
@@ -554,7 +555,7 @@ let GoogleGenerativeAI;
                     currentGameState.currentHighestBid = 0;
                     currentGameState.currentHighestBidder = null;
                     currentGameState.auctionState = 'idle';
-                    broadcastToRoom(ws.roomId, { type: 'auction_cleared', auctionState: currentGameState }); // Will be sanitized by broadcastToRoom
+                    broadcastToRoom(ws.roomId, { type: 'auction_cleared', auctionState: currentGameState });
                     break;
 
                 case 'place_bid':
@@ -577,7 +578,7 @@ let GoogleGenerativeAI;
                     if (currentGameState.currentHighestBidder && currentGameState.players[currentGameState.currentHighestBidder] && currentGameState.currentHighestBidder !== ws.playerId) {
                         const prevHighestBidder = currentGameState.players[currentGameState.currentHighestBidder];
                         if (prevHighestBidder.ws && prevHighestBidder.ws.readyState === WebSocket.OPEN) {
-                            prevHighestBidder.budget += currentGameState.currentHighestBid; // Refund previous highest bid
+                            prevHighestBidder.budget += currentGameState.currentHighestBid;
                             sendToClient(prevHighestBidder.ws, {
                                 type: 'player_bid_update',
                                 playerBudget: prevHighestBidder.budget,
@@ -595,7 +596,7 @@ let GoogleGenerativeAI;
 
                     broadcastToRoom(ws.roomId, {
                         type: 'player_bid_update',
-                        auctionState: currentGameState, // Will be sanitized by broadcastToRoom
+                        auctionState: currentGameState,
                         playerId: ws.playerId,
                         playerBudget: player.budget,
                         message: `${player.name} bid $${bid.toLocaleString()} for "${currentGameState.currentAuctionItem.name}".`,
@@ -608,7 +609,7 @@ let GoogleGenerativeAI;
                     sendToClient(ws, {
                         type: 'llm_response',
                         response: llmResponse,
-                        clientId: ws.id // Send back to the specific client's WS ID
+                        clientId: ws.id
                     });
                     break;
 
@@ -619,7 +620,7 @@ let GoogleGenerativeAI;
         });
 
         ws.on('close', () => {
-            console.log(`Client ${ws.id} disconnected (Room: ${ws.roomId}, Role: ${ws.role})`);
+            console.log(`Client ${ws.id} disconnected (Room: ${ws.roomId}, Role: ${ws.role}, PlayerId: ${ws.playerId})`);
 
             if (!ws.roomId || !gameRooms[ws.roomId]) {
                 return;
@@ -628,18 +629,19 @@ let GoogleGenerativeAI;
             const room = gameRooms[ws.roomId];
             const currentGameState = room.gameState;
 
-            if (ws.id === room.auctioneerWsId) {
-                room.auctioneerWsId = null; // Clear auctioneer's live WS ID
+            // Check if the disconnected client was the Auctioneer
+            if (ws.playerId === room.auctioneerPlayerId) {
+                room.activeAuctioneerWsId = null; // Clear the active WS ID for this auctioneer
                 broadcastToRoom(ws.roomId, { type: 'info', message: 'Auctioneer disconnected. Auction halted.' });
 
                 if (currentGameState.currentAuctionItem && currentGameState.currentAuctionItem.status === 'auctioning') {
                     const itemInList = currentGameState.items.find(item => item.id === currentGameState.currentAuctionItem.id);
-                    if (itemInList) itemInList.status = 'pending'; // Return item to pending
+                    if (itemInList) itemInList.status = 'pending';
                 }
                 if (currentGameState.currentHighestBidder && currentGameState.players[currentGameState.currentHighestBidder] && currentGameState.auctionState === 'bidding') {
                      const player = currentGameState.players[currentGameState.currentHighestBidder];
                     if (player.ws && player.ws.readyState === WebSocket.OPEN) {
-                        player.budget += currentGameState.currentHighestBid; // Refund the bid
+                        player.budget += currentGameState.currentHighestBid;
                         sendToClient(player.ws, {
                             type: 'player_bid_update',
                             playerBudget: player.budget,
@@ -653,14 +655,18 @@ let GoogleGenerativeAI;
                 currentGameState.currentHighestBidder = null;
                 currentGameState.auctionState = 'idle';
                 stopAuctionTimer(ws.roomId);
-                broadcastToRoom(ws.roomId, { type: 'auction_cleared', auctionState: currentGameState }); // Will be sanitized by broadcastToRoom
+                broadcastToRoom(ws.roomId, { type: 'auction_cleared', auctionState: currentGameState });
 
-                const remainingPlayersInRoom = Object.values(currentGameState.players).filter(p => p.ws && p.ws.readyState === WebSocket.OPEN);
-                if (remainingPlayersInRoom.length === 0) {
+                // Check if all clients (including auctioneer's *active* socket) have disconnected
+                const activePlayersInRoom = Object.values(currentGameState.players).filter(p => p.ws && p.ws.readyState === WebSocket.OPEN && p.playerId !== room.auctioneerPlayerId);
+                const auctioneerActiveWs = room.activeAuctioneerWsId && Array.from(wss.clients).find(client => client.id === room.activeAuctioneerWsId && client.readyState === WebSocket.OPEN);
+
+                if (activePlayersInRoom.length === 0 && !auctioneerActiveWs) {
                     stopAuctionTimer(ws.roomId);
                     delete gameRooms[ws.roomId];
                     console.log(`Room ${ws.roomId} deleted as all clients disconnected.`);
                 }
+
             } else if (ws.role === 'player' && ws.playerId && currentGameState.players[ws.playerId]) {
                 const playerName = currentGameState.players[ws.playerId].name;
                 if (currentGameState.currentHighestBidder === ws.playerId) {
@@ -672,19 +678,17 @@ let GoogleGenerativeAI;
                     }
                     broadcastToRoom(ws.roomId, { type: 'info', message: `${playerName} disconnected. Highest bid retracted. Current bid reset to $${currentGameState.currentHighestBid.toLocaleString()}.` });
                     resetAuctionTimer(ws.roomId);
-                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState }); // Will be sanitized by broadcastToRoom
+                    broadcastToRoom(ws.roomId, { type: 'auction_state_update', state: currentGameState });
                 }
-                // Mark player's websocket as null/invalidated, don't delete player object immediately in case of reconnect
-                // This ensures the player data (name, budget, wonItems) persists for a potential reconnection
-                currentGameState.players[ws.playerId].ws = null;
+                currentGameState.players[ws.playerId].ws = null; // Mark player's websocket as null/invalidated
 
                 broadcastToRoom(ws.roomId, { type: 'info', message: `${playerName} left the game.` });
 
-                const activeClientsInRoom = Array.from(wss.clients).filter(client => client.roomId === ws.roomId && client.readyState === WebSocket.OPEN);
-                // Also check if the auctioneer is still connected (auctioneerWsId is not null AND their WS is active)
-                const auctioneerActive = room.auctioneerWsId && Array.from(wss.clients).find(c => c.id === room.auctioneerWsId && c.readyState === WebSocket.OPEN);
+                // Check if all clients have disconnected
+                const activePlayersInRoom = Object.values(currentGameState.players).filter(p => p.ws && p.ws.readyState === WebSocket.OPEN && p.playerId !== room.auctioneerPlayerId);
+                const auctioneerActiveWs = room.activeAuctioneerWsId && Array.from(wss.clients).find(client => client.id === room.activeAuctioneerWsId && client.readyState === WebSocket.OPEN);
 
-                if (activeClientsInRoom.length === 0 && !auctioneerActive) {
+                if (activePlayersInRoom.length === 0 && !auctioneerActiveWs) {
                     stopAuctionTimer(ws.roomId);
                     delete gameRooms[ws.roomId];
                     console.log(`Room ${ws.roomId} deleted as all clients disconnected.`);
@@ -693,7 +697,7 @@ let GoogleGenerativeAI;
         });
 
         ws.on('error', error => {
-            console.error(`WebSocket Error for client ${ws.id} (Room: ${ws.roomId}, Role: ${ws.role}):`, error);
+            console.error(`WebSocket Error for client ${ws.id} (Room: ${ws.roomId}, Role: ${ws.role}, PlayerId: ${ws.playerId}):`, error);
         });
     });
 

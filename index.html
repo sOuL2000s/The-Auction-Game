@@ -8,6 +8,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
 <body>
     <div class="header">
@@ -39,41 +41,39 @@
                 <h2>Your Corner</h2>
                 <p class="current-room-display">Current Room: <span id="playerRoomIdDisplay" class="room-id"></span></p>
 
-                <div class="player-info card">
-                    <p>Player ID: <span id="playerIdDisplay" class="player-id"></span></p>
-                    <p>Your Display Name:</p>
-                    <input type="text" id="playerNameInput" placeholder="Enter your name" maxlength="20">
-                    <button id="setPlayerNameBtn" class="action-btn">Set Name</button>
-                    <p class="budget-display">Budget: $<span id="playerBudgetDisplay">0</span></p>
-                </div>
-
-                <h3>Current Auction</h3>
-                <div id="player-current-auction" class="auction-display card">
-                    <p class="item-name">Item: <span id="currentAuctionItemName">Awaiting Auction</span></p>
-                    <p class="current-bid">Current Bid: $<span id="currentAuctionBid">0</span></p>
-                    <p class="highest-bidder">Highest Bidder: <span id="currentHighestBidder">N/A</span></p>
-
-                    <div id="bid-input-area" class="bid-input-area" style="display: none;">
-                        <input type="number" id="bidAmountInput" placeholder="Your Bid" min="0">
-                        <button id="placeBidBtn" class="bid-btn">Place Bid!</button>
+                <div class="tabs-container">
+                    <div class="tabs-nav">
+                        <button class="tab-button active" data-tab="player-auction-tab" title="Current Auction"><i class="fa-solid fa-gavel"></i></button>
+                        <button class="tab-button" data-tab="player-profile-winnings" title="My Profile & Winnings"><i class="fa-solid fa-user"></i></button>
                     </div>
-                </div>
 
-                <h3>Your Winnings</h3>
-                <ul id="playerWonItemsList" class="item-list card">
-                    <li class="placeholder-item">No items won yet.</li>
-                </ul>
+                    <div id="player-auction-tab" class="tab-content active">
+                        <h3>Current Auction</h3>
+                        <div id="player-current-auction" class="auction-display card">
+                            <p class="item-name">Item: <span id="currentAuctionItemName">Awaiting Auction</span></p>
+                            <p class="current-bid">Current Bid: $<span id="currentAuctionBid">0</span></p>
+                            <p class="highest-bidder">Highest Bidder: <span id="currentHighestBidder">N/A</span></p>
 
-                <div class="llm-assistant-section card">
-                    <h3>AI Assistant</h3>
-                    <div id="playerLlmChat" class="llm-chat-window">
-                        <div class="llm-messages" id="playerLlmMessages">
-                            <p class="llm-message bot">Hello! Ask me anything about the auction rules or items.</p>
+                            <div id="bid-input-area" class="bid-input-area" style="display: none;">
+                                <input type="number" id="bidAmountInput" placeholder="Your Bid" min="0">
+                                <button id="placeBidBtn" class="bid-btn">Place Bid!</button>
+                            </div>
                         </div>
-                        <div class="llm-input-area">
-                            <input type="text" id="playerLlmInput" placeholder="Ask the AI...">
-                            <button id="playerLlmSendBtn">Send</button>
+                    </div>
+
+                    <div id="player-profile-winnings" class="tab-content">
+                        <div class="player-info card">
+                            <p>Player ID: <span id="playerIdDisplay" class="player-id"></span></p>
+                            <p>Your Display Name:</p>
+                            <input type="text" id="playerNameInput" placeholder="Enter your name" maxlength="20">
+                            <button id="setPlayerNameBtn" class="action-btn">Set Name</button>
+                            <p class="budget-display">Budget: $<span id="playerBudgetDisplay">0</span></p>
                         </div>
+
+                        <h3>Your Winnings</h3>
+                        <ul id="playerWonItemsList" class="item-list card">
+                            <li class="placeholder-item">No items won yet.</li>
+                        </ul>
                     </div>
                 </div>
             </aside>
@@ -106,10 +106,9 @@
 
                 <div class="tabs-container">
                     <div class="tabs-nav">
-                        <button class="tab-button active" data-tab="auction-control">Auction</button>
-                        <button class="tab-button" data-tab="item-inventory">Inventory</button>
-                        <button class="tab-button" data-tab="game-settings">Settings</button>
-                        <button class="tab-button" data-tab="auctioneer-llm">AI Guide</button>
+                        <button class="tab-button active" data-tab="auction-control" title="Auction Control"><i class="fa-solid fa-gavel"></i></button>
+                        <button class="tab-button" data-tab="item-inventory" title="Item Inventory"><i class="fa-solid fa-boxes-stacked"></i></button>
+                        <button class="tab-button" data-tab="game-settings" title="Game Settings"><i class="fa-solid fa-gear"></i></button>
                     </div>
 
                     <div id="auction-control" class="tab-content active">
@@ -156,23 +155,26 @@
 
                         <button id="updateSettingsBtn" class="action-btn">Update Settings</button>
                     </div>
-
-                    <div id="auctioneer-llm" class="tab-content">
-                        <h3>AI Assistant</h3>
-                        <div id="auctioneerLlmChat" class="llm-chat-window">
-                            <div class="llm-messages" id="auctioneerLlmMessages">
-                                <p class="llm-message bot">Hello, Auctioneer! How may I assist you?</p>
-                            </div>
-                            <div class="llm-input-area">
-                                <input type="text" id="auctioneerLlmInput" placeholder="Ask the AI...">
-                                <button id="auctioneerLlmSendBtn">Send</button>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </aside>
         </div> <!-- End .game-container -->
     </div> <!-- End .game-wrapper -->
+
+    <!-- Floating AI Assistant -->
+    <div id="globalFloatingLlmAssistant" class="floating-ai-assistant" style="display: none;">
+        <button id="toggleLlmChatBtn" class="floating-ai-toggle" title="Toggle AI Assistant">
+            <i class="fa-solid fa-robot"></i>
+        </button>
+        <div id="globalLlmChat" class="llm-chat-window" style="display: none;">
+            <div class="llm-messages" id="globalLlmMessages">
+                <p class="llm-message bot">Hello! Ask me anything about the auction rules or items.</p>
+            </div>
+            <div class="llm-input-area">
+                <input type="text" id="globalLlmInput" placeholder="Ask the AI...">
+                <button id="globalLlmSendBtn">Send</button>
+            </div>
+        </div>
+    </div>
 
     <audio id="bidSound" src="https://www.soundjay.com/buttons/sounds/button-2.mp3" preload="auto"></audio>
     <audio id="hammerSound" src="https://www.soundjay.com/misc/sounds/hammer.mp3" preload="auto"></audio>

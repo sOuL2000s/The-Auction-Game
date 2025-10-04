@@ -1,8 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- WebSocket Setup ---
-    // For deployment: use wss and actual host
     const PROTOCOL = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const HOST = window.location.host; // Use current host for deployment
+    const HOST = window.location.host;
     const socket = new WebSocket(`${PROTOCOL}//${HOST}`);
 
     // --- UI Elements ---
@@ -21,15 +20,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const playerPanel = document.getElementById('playerPanel');
     const mainAuctionArea = document.getElementById('mainAuctionArea');
     const auctioneerPanel = document.getElementById('auctioneerPanel');
-    const scoreboardPanel = document.getElementById('scoreboardPanel'); // New scoreboard panel
+    const scoreboardPanel = document.getElementById('scoreboardPanel');
+
+    // Player Panel Tabs
+    const playerTabsNav = playerPanel.querySelector('.tabs-nav');
+    const playerTabButtons = playerPanel.querySelectorAll('.tabs-nav .tab-button');
+    const playerTabContents = playerPanel.querySelectorAll('.tab-content');
+
+    // Auctioneer Panel Tabs
+    const auctioneerTabsNav = auctioneerPanel.querySelector('.tabs-nav');
+    const auctioneerTabButtons = auctioneerPanel.querySelectorAll('.tabs-nav .tab-button');
+    const auctioneerTabContents = auctioneerPanel.querySelectorAll('.tab-content');
 
     // Auctioneer Elements
     const auctioneerRoomIdDisplay = document.getElementById('auctioneerRoomIdDisplay');
-    // Auctioneer Tabs
-    const tabsNav = auctioneerPanel.querySelector('.tabs-nav');
-    const tabButtons = auctioneerPanel.querySelectorAll('.tab-button');
-    const tabContents = auctioneerPanel.querySelectorAll('.tab-content');
-
     const itemNameInput = document.getElementById('itemNameInput');
     const itemBasePriceInput = document.getElementById('itemBasePriceInput');
     const addItemBtn = document.getElementById('addItemBtn');
@@ -49,18 +53,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const auctionDurationInput = document.getElementById('auctionDurationInput');
     const updateSettingsBtn = document.getElementById('updateSettingsBtn');
 
-    // Player Elements
+    // Player Elements (now within player-profile-winnings tab)
     const playerRoomIdDisplay = document.getElementById('playerRoomIdDisplay');
     const playerIdDisplay = document.getElementById('playerIdDisplay');
     const playerNameInput = document.getElementById('playerNameInput');
     const setPlayerNameBtn = document.getElementById('setPlayerNameBtn');
     const playerBudgetDisplay = document.getElementById('playerBudgetDisplay');
+
+    // Player Current Auction elements (within player-auction-tab)
     const currentAuctionItemName = document.getElementById('currentAuctionItemName');
     const currentAuctionBid = document.getElementById('currentAuctionBid');
     const currentHighestBidder = document.getElementById('currentHighestBidder');
     const bidInputArea = document.getElementById('bid-input-area');
     const bidAmountInput = document.getElementById('bidAmountInput');
     const placeBidBtn = document.getElementById('placeBidBtn');
+
+    // Player Winnings list (within player-profile-winnings tab)
     const playerWonItemsList = document.getElementById('playerWonItemsList');
 
     // Central Auction Display
@@ -70,24 +78,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const timerCountdown = document.getElementById('timer-countdown');
 
     // Scoreboard Elements
-    const playerScoresContainer = document.getElementById('playerScoresContainer'); // New scoreboard container
+    const playerScoresContainer = document.getElementById('playerScoresContainer');
 
-    // LLM Assistant Elements
-    const playerLlmMessages = document.getElementById('playerLlmMessages');
-    const playerLlmInput = document.getElementById('playerLlmInput');
-    const playerLlmSendBtn = document.getElementById('playerLlmSendBtn');
-    const auctioneerLlmMessages = document.getElementById('auctioneerLlmMessages');
-    const auctioneerLlmInput = document.getElementById('auctioneerLlmInput');
-    const auctioneerLlmSendBtn = document.getElementById('auctioneerLlmSendBtn');
+    // Floating LLM Assistant Elements
+    const globalFloatingLlmAssistant = document.getElementById('globalFloatingLlmAssistant');
+    const toggleLlmChatBtn = document.getElementById('toggleLlmChatBtn');
+    const globalLlmChat = document.getElementById('globalLlmChat');
+    const globalLlmMessages = document.getElementById('globalLlmMessages');
+    const globalLlmInput = document.getElementById('globalLlmInput');
+    const globalLlmSendBtn = document.getElementById('globalLlmSendBtn');
 
 
     // --- Game State Variables (Client-side) ---
-    let myClientId = null; // This client's unique WS ID
-    let myPlayerId = null; // This client's in-game player ID (if registered as player)
+    let myClientId = null;
+    let myPlayerId = null;
     let myRole = 'guest'; // 'guest', 'player', 'auctioneer'
     let currentRoomId = null;
     let myPlayerBudget = 0;
-    let currentAuctionState = {}; // To hold the full game state for the current room from server
+    let currentAuctionState = {};
 
 
     // --- Helper Functions ---
@@ -100,8 +108,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function playSound(audioElement) {
-        if (audioElement && audioElement.readyState >= 2) { // Check if sound is loaded
-            audioElement.currentTime = 0; // Rewind to start
+        if (audioElement && audioElement.readyState >= 2) {
+            audioElement.currentTime = 0;
             audioElement.play().catch(e => console.warn("Audio play failed:", e));
         }
     }
@@ -111,18 +119,19 @@ document.addEventListener('DOMContentLoaded', () => {
         p.classList.add('llm-message', sender);
         p.textContent = message;
         chatWindow.appendChild(p);
-        chatWindow.scrollTop = chatWindow.scrollHeight; // Auto-scroll to bottom
+        chatWindow.scrollTop = chatWindow.scrollHeight;
     }
 
-    function activateTab(tabId) {
-        tabButtons.forEach(button => {
+    // Generic tab activation function
+    function activateTab(tabButtonsList, tabContentsList, tabId) {
+        tabButtonsList.forEach(button => {
             if (button.dataset.tab === tabId) {
                 button.classList.add('active');
             } else {
                 button.classList.remove('active');
             }
         });
-        tabContents.forEach(content => {
+        tabContentsList.forEach(content => {
             if (content.id === tabId) {
                 content.classList.add('active');
             } else {
@@ -136,9 +145,9 @@ document.addEventListener('DOMContentLoaded', () => {
         playerPanel.style.display = 'none';
         mainAuctionArea.style.display = 'none';
         auctioneerPanel.style.display = 'none';
-        scoreboardPanel.style.display = 'none'; // Hide scoreboard
+        scoreboardPanel.style.display = 'none';
+        globalFloatingLlmAssistant.style.display = 'none'; // Hide floating AI
 
-        // Clear existing game state/UI elements
         myClientId = null;
         myPlayerId = null;
         myRole = 'guest';
@@ -146,7 +155,6 @@ document.addEventListener('DOMContentLoaded', () => {
         myPlayerBudget = 0;
         currentAuctionState = {};
 
-        // Reset specific UI elements
         roomIdInput.value = '';
         playerRoomIdDisplay.textContent = '';
         auctioneerRoomIdDisplay.textContent = '';
@@ -157,19 +165,17 @@ document.addEventListener('DOMContentLoaded', () => {
         currentAuctionBid.textContent = '0';
         currentHighestBidder.textContent = 'N/A';
         bidInputArea.style.display = 'none';
-        bidAmountInput.value = ''; // Ensure bid input is cleared
+        bidAmountInput.value = '';
         playerWonItemsList.innerHTML = '<li class="placeholder-item">No items won yet.</li>';
         auctioneerItemsList.innerHTML = '<li class="placeholder-item">No items added yet.</li>';
         centralAuctionItemDiv.innerHTML = '<p class="status-message" id="centralStatusMessage">Auction awaits the Auctioneer.</p>';
         auctionTimerDisplay.style.display = 'none';
         timerCountdown.textContent = '00:00';
-        playerScoresContainer.innerHTML = '<p class="placeholder-item">No players yet. Join a room!</p>'; // Reset scoreboard
+        playerScoresContainer.innerHTML = '<p class="placeholder-item">No players yet. Join a room!</p>';
 
-        // Reset LLM chat windows
-        playerLlmMessages.innerHTML = '<p class="llm-message bot">Hello! Ask me anything about the auction rules or items.</p>';
-        auctioneerLlmMessages.innerHTML = '<p class="llm-message bot">Hello, Auctioneer! How may I assist you?</p>';
+        globalLlmMessages.innerHTML = '<p class="llm-message bot">Hello! Ask me anything about the auction rules or items.</p>';
+        globalLlmChat.style.display = 'none'; // Collapse floating AI chat on reset
 
-        // Re-enable initial buttons
         joinRoomBtn.disabled = false;
         createRoomBtn.disabled = false;
     }
@@ -179,25 +185,25 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.onopen = () => {
         console.log('Connected to WebSocket server');
         showMessage('Connected to The Grand Auction House server.', 'success');
-        resetUI(); // Show room selection initially
+        resetUI();
 
-        // Try to re-establish session from localStorage if available
-        const storedRoomId = localStorage.getItem('roomId');
-        const storedPlayerId = localStorage.getItem('playerId');
-        const storedPlayerName = localStorage.getItem('playerName');
-        const storedRole = localStorage.getItem('role');
+        // Use sessionStorage for per-tab session data
+        const storedRoomId = sessionStorage.getItem('roomId');
+        const storedPlayerId = sessionStorage.getItem('playerId');
+        const storedPlayerName = sessionStorage.getItem('playerName');
+        const storedRole = sessionStorage.getItem('role');
 
         if (storedRoomId && storedPlayerId && storedRole) {
             console.log(`Attempting to rejoin room ${storedRoomId} as ${storedRole} with ID ${storedPlayerId}`);
             socket.send(JSON.stringify({
                 type: 'reconnect_session',
                 roomId: storedRoomId,
-                playerId: storedPlayerId, // This is the player ID
+                playerId: storedPlayerId,
                 playerName: storedPlayerName,
                 role: storedRole
             }));
         } else {
-            console.log("No stored session found, showing room selection.");
+            console.log("No stored session found for this tab, showing room selection.");
             roomSelectionArea.style.display = 'flex';
         }
     };
@@ -208,40 +214,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
         switch (message.type) {
             case 'client_id_assigned':
-                myClientId = message.id; // Store client's unique WS ID
+                myClientId = message.id;
                 console.log("My client ID is:", myClientId);
                 break;
 
             case 'room_created':
                 currentRoomId = message.roomId;
-                myRole = 'auctioneer'; // The creator is automatically the auctioneer
-                localStorage.setItem('roomId', currentRoomId);
-                localStorage.setItem('role', myRole);
+                myRole = 'auctioneer';
+                myPlayerId = message.playerId; // Server now sends auctioneer's player ID on creation
+                sessionStorage.setItem('roomId', currentRoomId);
+                sessionStorage.setItem('playerId', myPlayerId);
+                sessionStorage.setItem('role', myRole);
                 showMessage(`Room "${currentRoomId}" created! You are the Auctioneer.`, 'success');
                 displayGameUI();
-                activateTab('auction-control'); // Set default tab for auctioneer
-                // We rely on 'auction_state_update' which follows this to populate the UI fully
+                activateTab(auctioneerTabButtons, auctioneerTabContents, 'auction-control'); // Default tab for auctioneer
+                globalFloatingLlmAssistant.style.display = 'flex'; // Show floating AI
                 break;
 
             case 'joined_room':
                 currentRoomId = message.roomId;
                 myRole = message.role;
-                myPlayerId = message.playerId; // This is the in-game player ID
+                myPlayerId = message.playerId;
                 myPlayerBudget = message.budget;
-                localStorage.setItem('roomId', currentRoomId);
-                localStorage.setItem('playerId', myPlayerId);
-                localStorage.setItem('playerName', message.playerName);
-                localStorage.setItem('role', myRole);
+                sessionStorage.setItem('roomId', currentRoomId);
+                sessionStorage.setItem('playerId', myPlayerId);
+                sessionStorage.setItem('playerName', message.playerName);
+                sessionStorage.setItem('role', myRole);
 
                 if (myRole === 'player') {
                     playerIdDisplay.textContent = myPlayerId.substring(0, 8);
                     playerNameInput.value = message.playerName || `Player ${myPlayerId.substring(0, 8)}`;
                     playerBudgetDisplay.textContent = myPlayerBudget.toLocaleString();
-                } // Auctioneer UI will be updated by auction_state_update
+                    activateTab(playerTabButtons, playerTabContents, 'player-auction-tab'); // Default player tab
+                }
                 showMessage(`Joined room "${currentRoomId}" as ${myRole === 'auctioneer' ? 'Auctioneer' : 'Player'}!`, 'success');
                 displayGameUI();
-                if (myRole === 'auctioneer') activateTab('auction-control');
-                // 'auction_state_update' will immediately follow, no need to call updateScoreboardDisplay here explicitly
+                if (myRole === 'auctioneer') activateTab(auctioneerTabButtons, auctioneerTabContents, 'auction-control');
+                globalFloatingLlmAssistant.style.display = 'flex'; // Show floating AI
                 break;
 
             case 'reconnected_session':
@@ -249,20 +258,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 myRole = message.role;
                 myPlayerId = message.playerId;
                 myPlayerBudget = message.budget;
-                localStorage.setItem('roomId', currentRoomId);
-                localStorage.setItem('playerId', myPlayerId);
-                localStorage.setItem('playerName', message.playerName);
-                localStorage.setItem('role', myRole);
+                sessionStorage.setItem('roomId', currentRoomId);
+                sessionStorage.setItem('playerId', myPlayerId);
+                sessionStorage.setItem('playerName', message.playerName);
+                sessionStorage.setItem('role', myRole);
 
                 if (myRole === 'player') {
                     playerIdDisplay.textContent = myPlayerId.substring(0, 8);
                     playerNameInput.value = message.playerName || `Player ${myPlayerId.substring(0, 8)}`;
                     playerBudgetDisplay.textContent = myPlayerBudget.toLocaleString();
+                    activateTab(playerTabButtons, playerTabContents, 'player-auction-tab'); // Default player tab
                 }
                 showMessage(`Reconnected to room "${currentRoomId}" as ${message.playerName || myRole}!`, 'info');
                 displayGameUI();
-                if (myRole === 'auctioneer') activateTab('auction-control');
-                // 'auction_state_update' will immediately follow, no need to call updateScoreboardDisplay here explicitly
+                if (myRole === 'auctioneer') activateTab(auctioneerTabButtons, auctioneerTabContents, 'auction-control');
+                globalFloatingLlmAssistant.style.display = 'flex'; // Show floating AI
                 break;
 
             case 'room_full':
@@ -270,36 +280,31 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'already_in_room':
             case 'auctioneer_exists':
                 showMessage(message.message, 'error');
-                // Stay on room selection screen
                 roomSelectionArea.style.display = 'flex';
+                globalFloatingLlmAssistant.style.display = 'none'; // Hide floating AI if re-joining fails
                 break;
 
             case 'item_added':
-                // The broadcasted auction_state_update handles UI refresh,
-                // this is mostly for the message.
-                // updateAuctioneerItems(message.items); // No longer needed here, state_update handles
                 if (auctioneerItemsList.querySelector('.placeholder-item')) auctioneerItemsList.innerHTML = '';
                 showMessage(`"${message.item.name}" added to the inventory.`, 'info');
                 break;
             case 'batch_items_added':
-                // updateAuctioneerItems(message.items); // No longer needed here, state_update handles
                 if (auctioneerItemsList.querySelector('.placeholder-item')) auctioneerItemsList.innerHTML = '';
                 showMessage(`${message.count} items added to the inventory.`, 'success');
                 break;
 
             case 'auction_state_update':
-                currentAuctionState = message.state; // Update local state copy for the current room
+                currentAuctionState = message.state;
                 updateAuctionDisplay(message.state);
                 updateCentralAuctionDisplay(message.state);
-                updateAuctioneerItems(message.state.items); // Refresh auctioneer's item list
-                updateTimerDisplay(message.state.timer); // Update timer
-                updateScoreboardDisplay(message.state); // Update scoreboard
-                // Also update player's budget if they reconnected or name changed
+                updateAuctioneerItems(message.state.items);
+                updateTimerDisplay(message.state.timer);
+                updateScoreboardDisplay(message.state);
+                // Update player's budget and won items if they are in the current room
                 if (myPlayerId && message.state.players[myPlayerId]) {
                     myPlayerBudget = message.state.players[myPlayerId].budget;
                     playerBudgetDisplay.textContent = myPlayerBudget.toLocaleString();
-                    playerNameInput.value = message.state.players[myPlayerId].name;
-                    // Update player's won items list
+                    playerNameInput.value = message.state.players[myPlayerId].name; // Update player name in input
                     if (message.state.players[myPlayerId].wonItems.length > 0) {
                         playerWonItemsList.innerHTML = message.state.players[myPlayerId].wonItems.map(item =>
                             `<li><span class="item-name">${item.name}</span> <span class="item-price">($${item.finalBid.toLocaleString()})</span></li>`
@@ -311,29 +316,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
 
             case 'player_bid_update':
-                currentAuctionState = message.auctionState; // Update local state copy
-                updateAuctionDisplay(message.auctionState, true); // Trigger bid animation
-                updateCentralAuctionDisplay(message.auctionState, true); // Trigger bid animation
+                currentAuctionState = message.auctionState;
+                updateAuctionDisplay(message.auctionState, true);
+                updateCentralAuctionDisplay(message.auctionState, true);
                 if (myPlayerId && message.playerId === myPlayerId) {
                     myPlayerBudget = message.playerBudget;
                     playerBudgetDisplay.textContent = myPlayerBudget.toLocaleString();
-                    // Clear user's bid input after a successful bid
-                    bidAmountInput.value = '';
+                    bidAmountInput.value = ''; // Clear user's bid input after a successful bid
                 }
                 if (message.message) {
                     showMessage(message.message, message.success ? 'success' : 'error');
                 }
-                playSound(bidSound); // Play bid sound
-                updateTimerDisplay(message.auctionState.timer); // Update timer
-                updateScoreboardDisplay(message.auctionState); // Update scoreboard
+                playSound(bidSound);
+                updateTimerDisplay(message.auctionState.timer);
+                updateScoreboardDisplay(message.auctionState);
                 break;
 
             case 'item_finalized':
-                currentAuctionState = message.auctionState; // Update local state copy
+                currentAuctionState = message.auctionState;
                 updateAuctionDisplay(message.auctionState);
                 updateCentralAuctionDisplay(message.auctionState);
                 updateAuctioneerItems(message.auctionState.items);
-                updateTimerDisplay(message.auctionState.timer); // Reset timer display
+                updateTimerDisplay(message.auctionState.timer);
                 if (myPlayerId && message.winnerId === myPlayerId) {
                     if (playerWonItemsList.querySelector('.placeholder-item')) playerWonItemsList.innerHTML = '';
                     playerWonItemsList.innerHTML += `<li><span class="item-name">${message.item.name}</span> <span class="item-price">($${message.finalBid.toLocaleString()})</span></li>`;
@@ -341,34 +345,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 showMessage(`${message.item.name} SOLD! Winner: ${message.winnerName || message.winnerId.substring(0,8)} for $${message.finalBid.toLocaleString()}!`, 'success');
                 playSound(hammerSound);
                 triggerHammerEffect();
-                updateScoreboardDisplay(message.auctionState); // Update scoreboard
+                updateScoreboardDisplay(message.auctionState);
                 break;
             case 'auction_cleared':
-                currentAuctionState = message.auctionState; // Update local state copy
+                currentAuctionState = message.auctionState;
                 updateAuctionDisplay(message.auctionState);
                 updateCentralAuctionDisplay(message.auctionState);
                 updateAuctioneerItems(message.auctionState.items);
-                updateTimerDisplay(message.auctionState.timer); // Reset timer display
+                updateTimerDisplay(message.auctionState.timer);
                 showMessage('Auction cleared by the Auctioneer.', 'info');
-                updateScoreboardDisplay(message.auctionState); // Update scoreboard
+                updateScoreboardDisplay(message.auctionState);
                 break;
             case 'settings_updated':
                 currentAuctionState.gameSettings = message.settings;
                 showMessage('Game settings updated by Auctioneer.', 'info');
-                // If auctioneer, update inputs to reflect new settings
                 if(myRole === 'auctioneer') {
                     startingBudgetInput.value = currentAuctionState.gameSettings.playerStartingBudget;
                     bidIncrementPercentInput.value = currentAuctionState.gameSettings.minBidIncrementPercentage;
                     auctionDurationInput.value = currentAuctionState.gameSettings.auctionRoundDuration;
                 }
-                updateScoreboardDisplay(currentAuctionState); // Update scoreboard as budgets might change for new players
+                updateScoreboardDisplay(currentAuctionState);
                 break;
 
             case 'llm_response':
-                if (message.clientId === myClientId) { // Only show response to the client who asked
-                    const targetChatWindow = myRole === 'auctioneer' ? auctioneerLlmMessages : playerLlmMessages;
-                    addLlmMessage(targetChatWindow, message.response, 'bot');
-                }
+                // LLM responses always target the global chat window
+                addLlmMessage(globalLlmMessages, message.response, 'bot');
                 break;
 
             case 'error':
@@ -383,15 +384,17 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.onclose = () => {
         console.log('Disconnected from WebSocket server');
         showMessage('Disconnected from auction server. Please restart the server or check connection.', 'error');
-        // Disable all controls
-        [joinRoomBtn, createRoomBtn, setPlayerNameBtn, addItemBtn, startBiddingBtn, finalizeItemBtn, clearAuctionBtn, placeBidBtn, updateSettingsBtn, addBatchItemsBtn, playerLlmSendBtn, auctioneerLlmSendBtn].forEach(btn => btn.disabled = true);
-        auctionTimerDisplay.style.display = 'none'; // Hide timer on disconnect
-        // Clear local storage for a fresh start next time
-        localStorage.removeItem('roomId');
-        localStorage.removeItem('playerId');
-        localStorage.removeItem('playerName');
-        localStorage.removeItem('role');
-        resetUI(); // Show room selection (disabled)
+
+        // Clear sessionStorage on disconnect to force new session on reload
+        sessionStorage.removeItem('roomId');
+        sessionStorage.removeItem('playerId');
+        sessionStorage.removeItem('playerName');
+        sessionStorage.removeItem('role');
+
+        [joinRoomBtn, createRoomBtn, setPlayerNameBtn, addItemBtn, startBiddingBtn, finalizeItemBtn, clearAuctionBtn, placeBidBtn, updateSettingsBtn, addBatchItemsBtn, globalLlmSendBtn].forEach(btn => btn.disabled = true);
+        auctionTimerDisplay.style.display = 'none';
+
+        resetUI();
     };
 
     socket.onerror = (error) => {
@@ -403,16 +406,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- UI Display Management ---
     function displayGameUI() {
         roomSelectionArea.style.display = 'none';
-        // Always display player and scoreboard, even if empty/placeholder
         playerPanel.style.display = 'flex';
         mainAuctionArea.style.display = 'flex';
         scoreboardPanel.style.display = 'flex';
+        globalFloatingLlmAssistant.style.display = 'flex'; // Ensure floating AI is shown once in a room
 
         if (myRole === 'auctioneer') {
-            playerPanel.style.display = 'none'; // Auctioneer sees their panel instead of player panel
+            playerPanel.style.display = 'none';
             auctioneerPanel.style.display = 'flex';
             auctioneerRoomIdDisplay.textContent = currentRoomId;
-            // Ensure auctioneer settings reflect current game state
             if (currentAuctionState.gameSettings) {
                 startingBudgetInput.value = currentAuctionState.gameSettings.playerStartingBudget;
                 bidIncrementPercentInput.value = currentAuctionState.gameSettings.minBidIncrementPercentage;
@@ -445,7 +447,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="item-status">${item.status === 'pending' ? ' (Ready)' : item.status === 'auctioning' ? ' (LIVE!)' : ' (SOLD)'}</span>
                 ${myRole === 'auctioneer' && item.status === 'pending' ? `<button class="select-item-btn action-btn">Select for Auction</button>` : ''}
             `;
-            // Add itemId to button only if it exists
             const selectBtn = li.querySelector('.select-item-btn');
             if (selectBtn) {
                 selectBtn.dataset.itemId = item.id;
@@ -456,10 +457,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateAuctionDisplay(state, isNewBid = false) {
-        // Player View
         const itemName = state.currentAuctionItem ? state.currentAuctionItem.name : 'Awaiting Auction';
         const currentBid = state.currentHighestBid;
-        // Use player name from state if available, otherwise fallback to ID substring
         const highestBidderName = state.currentHighestBidder ? (state.players[state.currentHighestBidder]?.name || state.currentHighestBidder.substring(0,8)) : 'N/A';
 
         currentAuctionItemName.textContent = itemName;
@@ -472,17 +471,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const minBidValue = Math.ceil(currentBid * (1 + state.gameSettings.minBidIncrementPercentage / 100));
             bidAmountInput.min = minBidValue;
 
-            // Only update the input value if it's currently empty,
-            // or if the user is NOT actively typing AND their current value is too low.
             if (bidAmountInput.value === '') {
                 bidAmountInput.value = minBidValue;
             } else if (document.activeElement !== bidAmountInput && parseFloat(bidAmountInput.value) < minBidValue) {
-                // If not actively typing and current bid is invalid, update it
                 bidAmountInput.value = minBidValue;
             }
         } else {
             bidInputArea.style.display = 'none';
-            bidAmountInput.value = ''; // Clear bid input when bidding is not active
+            bidAmountInput.value = '';
         }
 
         if (isNewBid) {
@@ -492,7 +488,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 300);
         }
 
-        // Auctioneer View
         if (myRole === 'auctioneer') {
             if (state.currentAuctionItem) {
                 auctioneerCurrentItemDiv.innerHTML = `
@@ -568,10 +563,9 @@ document.addEventListener('DOMContentLoaded', () => {
         auctionHammerEffect.classList.add('show');
         setTimeout(() => {
             auctionHammerEffect.classList.remove('show');
-        }, 1500); // Duration of the effect
+        }, 1500);
     }
 
-    // New function to update the scoreboard
     function updateScoreboardDisplay(state) {
         playerScoresContainer.innerHTML = '';
         const players = Object.values(state.players);
@@ -581,17 +575,16 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Sort players for consistent display, e.g., by total won value
         players.sort((a, b) => {
             const aTotalValue = a.wonItems.reduce((sum, item) => sum + item.finalBid, 0);
             const bTotalValue = b.wonItems.reduce((sum, item) => sum + item.finalBid, 0);
-            return bTotalValue - aTotalValue; // Sort by highest total value first
+            return bTotalValue - aTotalValue;
         });
 
         players.forEach(player => {
             const playerCard = document.createElement('div');
             playerCard.classList.add('player-score-card');
-            if (player.playerId === myPlayerId) { // Highlight current player in scoreboard
+            if (player.playerId === myPlayerId) {
                 playerCard.classList.add('current-player-score');
             }
 
@@ -628,14 +621,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-
     // Player Actions
+    playerTabsNav.addEventListener('click', (event) => {
+        if (event.target.closest('.tab-button')) {
+            const tabId = event.target.closest('.tab-button').dataset.tab;
+            activateTab(playerTabButtons, playerTabContents, tabId);
+        }
+    });
+
     setPlayerNameBtn.addEventListener('click', () => {
         const name = playerNameInput.value.trim();
         if (name && myPlayerId && currentRoomId) {
             socket.send(JSON.stringify({ type: 'set_player_name', roomId: currentRoomId, playerId: myPlayerId, name }));
-            localStorage.setItem('playerName', name);
-            // showMessage is handled by the server response's auction_state_update
+            sessionStorage.setItem('playerName', name); // Update sessionStorage
         } else {
             showMessage('Please enter a valid display name.', 'error');
         }
@@ -658,11 +656,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Auctioneer Actions
-    // Tab switching listener
-    tabsNav.addEventListener('click', (event) => {
-        if (event.target.classList.contains('tab-button')) {
-            const tabId = event.target.dataset.tab;
-            activateTab(tabId);
+    auctioneerTabsNav.addEventListener('click', (event) => {
+        if (event.target.closest('.tab-button')) {
+            const tabId = event.target.closest('.tab-button').dataset.tab;
+            activateTab(auctioneerTabButtons, auctioneerTabContents, tabId);
         }
     });
 
@@ -710,7 +707,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     auctioneerItemsList.addEventListener('click', (event) => {
-        if (!currentRoomId || myRole !== 'auctioneer') return; // Must be auctioneer in a room
+        if (!currentRoomId || myRole !== 'auctioneer') return;
         if (event.target.classList.contains('select-item-btn')) {
             const itemId = event.target.dataset.itemId;
             socket.send(JSON.stringify({ type: 'select_item_for_auction', roomId: currentRoomId, itemId }));
@@ -718,21 +715,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     startBiddingBtn.addEventListener('click', () => {
-        if (!currentRoomId || myRole !== 'auctioneer') return; // Must be auctioneer in a room
+        if (!currentRoomId || myRole !== 'auctioneer') return;
         socket.send(JSON.stringify({ type: 'start_bidding', roomId: currentRoomId }));
     });
 
     finalizeItemBtn.addEventListener('click', () => {
-        if (!currentRoomId || myRole !== 'auctioneer') return; // Must be auctioneer in a room
+        if (!currentRoomId || myRole !== 'auctioneer') return;
         socket.send(JSON.stringify({ type: 'finalize_item', roomId: currentRoomId }));
     });
 
     clearAuctionBtn.addEventListener('click', () => {
-        if (!currentRoomId || myRole !== 'auctioneer') return; // Must be auctioneer in a room
+        if (!currentRoomId || myRole !== 'auctioneer') return;
         socket.send(JSON.stringify({ type: 'clear_auction', roomId: currentRoomId }));
     });
 
-    // Batch Item Inclusion
+    batchItemsInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const start = batchItemsInput.selectionStart;
+            const end = batchItemsInput.selectionEnd;
+            batchItemsInput.value = batchItemsInput.value.substring(0, start) + '\t' + batchItemsInput.value.substring(end);
+            batchItemsInput.selectionStart = batchItemsInput.selectionEnd = start + 1;
+        }
+    });
+
     addBatchItemsBtn.addEventListener('click', () => {
         if (!currentRoomId || myRole !== 'auctioneer') {
             showMessage('Only the auctioneer in an active room can add items.', 'error');
@@ -755,12 +761,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (rawData) {
             sendBatchItems(rawData);
         } else {
-            showMessage('Please enter raw item data or select a CSV file.', 'error');
+            showMessage('No valid items found in the input. Format: "Name,Price" per line.', 'error');
         }
     });
 
     function sendBatchItems(data) {
-        // Simple client-side validation/parsing for immediate feedback
         const items = data.split('\n').map(line => {
             const parts = line.split(',').map(p => p.trim());
             if (parts.length >= 2) {
@@ -776,37 +781,44 @@ document.addEventListener('DOMContentLoaded', () => {
         if (items.length > 0) {
             socket.send(JSON.stringify({ type: 'add_batch_items', roomId: currentRoomId, items }));
             batchItemsInput.value = '';
-            batchCsvFileInput.value = ''; // Clear file input
+            batchCsvFileInput.value = '';
         } else {
             showMessage('No valid items found in the input. Format: "Name,Price" per line.', 'error');
         }
     }
 
 
-    // LLM Assistant Listeners
-    playerLlmSendBtn.addEventListener('click', () => {
-        const query = playerLlmInput.value.trim();
-        if (query && currentRoomId) {
-            addLlmMessage(playerLlmMessages, query, 'user');
-            socket.send(JSON.stringify({ type: 'llm_query', roomId: currentRoomId, query, clientId: myClientId, role: myRole }));
-            playerLlmInput.value = '';
+    // Floating LLM Assistant Listeners
+    toggleLlmChatBtn.addEventListener('click', () => {
+        if (globalLlmChat.style.display === 'none' || globalLlmChat.style.display === '') {
+            globalLlmChat.style.display = 'flex';
+            toggleLlmChatBtn.classList.add('active');
+            globalLlmMessages.scrollTop = globalLlmMessages.scrollHeight; // Scroll to bottom on open
+        } else {
+            globalLlmChat.style.display = 'none';
+            toggleLlmChatBtn.classList.remove('active');
         }
-    });
-    playerLlmInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') playerLlmSendBtn.click();
     });
 
-    auctioneerLlmSendBtn.addEventListener('click', () => {
-        const query = auctioneerLlmInput.value.trim();
-        if (query && currentRoomId) {
-            addLlmMessage(auctioneerLlmMessages, query, 'user');
+    globalLlmSendBtn.addEventListener('click', () => {
+        const query = globalLlmInput.value.trim();
+        if (query && currentRoomId && myRole !== 'guest') { // Only allow if in a room and has a role
+            addLlmMessage(globalLlmMessages, query, 'user');
             socket.send(JSON.stringify({ type: 'llm_query', roomId: currentRoomId, query, clientId: myClientId, role: myRole }));
-            auctioneerLlmInput.value = '';
+            globalLlmInput.value = '';
+        } else if (query && myRole === 'guest') {
+            addLlmMessage(globalLlmMessages, query, 'user');
+            addLlmMessage(globalLlmMessages, "Please join or create a room to use the AI assistant for game-specific queries.", 'bot');
+            globalLlmInput.value = '';
+        } else if (!query) {
+             showMessage("Please type something to ask the AI.", "error");
         }
     });
-    auctioneerLlmInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') auctioneerLlmSendBtn.click();
+
+    globalLlmInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') globalLlmSendBtn.click();
     });
+
 
     // Initial population for placeholder lists
     if (playerWonItemsList.innerHTML === '') {

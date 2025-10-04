@@ -85,7 +85,7 @@ h2, h3 {
     display: flex;
     flex-direction: column;
     gap: 1.2rem;
-    overflow-y: auto; /* Enable scrolling for individual panels if content overflows */
+    overflow: hidden; /* Hide panel scrollbar, tabs/content will handle it */
     max-height: calc(100vh - 100px); /* Adjust based on header height, etc. */
 }
 
@@ -272,24 +272,44 @@ button:disabled {
 }
 
 
-/* Player Specific Styles */
-.player-info {
-    border: 1px dashed var(--accent-gold);
-}
-.player-info p {
-    margin: 0.3rem 0;
-}
-.player-id, .room-id {
-    color: var(--accent-gold);
-    font-weight: bold;
-}
-.current-room-display {
+/* Player & Auctioneer General Info */
+.player-panel .current-room-display,
+.auctioneer-panel .current-room-display {
     text-align: center;
     font-size: 1.1em;
     font-style: italic;
     color: #bbb;
     margin-bottom: 1rem;
 }
+.player-id, .room-id {
+    color: var(--accent-gold);
+    font-weight: bold;
+}
+
+
+/* Player Panel Specific Styles (tabs within) */
+.player-panel .tabs-container {
+    flex-grow: 1; /* Allow tab content to grow */
+    display: flex;
+    flex-direction: column;
+}
+.player-panel .tabs-nav {
+    margin-bottom: 1rem; /* Space between tabs and content */
+}
+.player-panel .tab-content {
+    flex-grow: 1; /* Allow content within active tab to fill space */
+    overflow-y: auto; /* Enable scrolling for individual tab content */
+    max-height: calc(100% - 60px); /* Adjust based on current-room-display + tabs-nav height */
+    padding-top: 0.5rem; /* Padding for content below tab nav */
+}
+
+
+/* Player Profile & Winnings Card */
+.player-info {
+    border: 1px dashed var(--accent-gold);
+    margin-bottom: 1.2rem; /* Space between player info and winnings list */
+}
+.player-info p { margin: 0.3rem 0; }
 .budget-display {
     font-size: 1.3em;
     font-weight: bold;
@@ -306,8 +326,7 @@ button:disabled {
     margin-right: 0;
 }
 
-
-/* Auction Display */
+/* Player Current Auction Display */
 .auction-display {
     transition: all 0.3s ease;
 }
@@ -331,7 +350,6 @@ button:disabled {
     font-size: 1em;
     color: var(--light-text);
 }
-
 .bid-input-area {
     margin-top: 1rem;
     border-top: 1px dashed var(--border-color);
@@ -348,11 +366,12 @@ button:disabled {
     margin-right: 0;
 }
 
-/* Item List Styles */
+
+/* Item List Styles (for Player Winnings and Auctioneer Items) */
 .item-list {
     list-style-type: none;
     padding: 0;
-    max-height: 250px;
+    max-height: 250px; /* Default height, will be overwritten by flex-grow in tabs if needed */
     overflow-y: auto;
     padding-top: 0;
     margin-top: 0;
@@ -417,15 +436,15 @@ button:disabled {
 }
 
 
-/* Auctioneer specific styles */
+/* Auctioneer Panel Tabs */
 .auctioneer-panel .current-room-display {
-    margin-bottom: 0.5rem; /* Tighter spacing above tabs */
+    margin-bottom: 0.5rem;
 }
 
-.tabs-container {
+.auctioneer-panel .tabs-container {
+    flex-grow: 1;
     display: flex;
     flex-direction: column;
-    flex-grow: 1; /* Allow content to grow */
 }
 
 .tabs-nav {
@@ -433,7 +452,7 @@ button:disabled {
     justify-content: space-around;
     border-bottom: 1px solid var(--border-color);
     margin-bottom: 1rem;
-    padding-bottom: 0; /* No padding at bottom of nav */
+    padding-bottom: 0;
 }
 
 .tab-button {
@@ -443,16 +462,51 @@ button:disabled {
     border: none;
     border-bottom: 3px solid transparent;
     padding: 0.75rem 0.5rem;
-    font-size: 0.95em;
+    font-size: 1.1em; /* Increased font size for icons */
     font-weight: bold;
     cursor: pointer;
     transition: all 0.2s ease;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin-right: 0; /* Remove default button margin */
-    border-radius: 0; /* Remove default button border-radius */
+    margin-right: 0;
+    border-radius: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative; /* For tooltip */
 }
+.tab-button i {
+    /* No margin-right needed if text is hidden */
+}
+.tab-button .tab-text {
+    display: none; /* Hide text, only show icon by default */
+}
+
+/* Tooltip for icon-only tabs */
+.tab-button::before {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%; /* Position above the button */
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #333;
+    color: white;
+    padding: 0.4em 0.8em;
+    border-radius: 4px;
+    font-size: 0.8em;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-in-out;
+    margin-bottom: 8px; /* Space between button and tooltip */
+    z-index: 10; /* Ensure tooltip is above other elements */
+}
+
+.tab-button:hover::before {
+    opacity: 1;
+}
+
 
 .tab-button:hover:not(.active) {
     color: var(--light-text);
@@ -469,21 +523,20 @@ button:disabled {
 
 .tab-content {
     display: none;
-    flex-grow: 1; /* Allow content to grow */
-    overflow-y: auto; /* Enable scrolling for tab content */
+    flex-direction: column;
+    flex-grow: 1;
+    overflow-y: auto;
     max-height: calc(100% - 60px); /* Adjust based on tab nav height */
     padding-top: 0.5rem;
 }
 
 .tab-content.active {
     display: flex;
-    flex-direction: column;
 }
 
-.auction-management, .game-settings, .item-management, .llm-assistant-section {
-    /* Uses .card style, remove explicit bottom padding as tab-content padding handles it */
+.auction-management, .game-settings, .item-management {
     padding-bottom: 1rem;
-    margin-bottom: 0.8rem; /* Consistent spacing between card sections */
+    margin-bottom: 0.8rem;
 }
 
 .auction-actions {
@@ -497,7 +550,7 @@ button:disabled {
 .auction-actions button {
     flex-grow: 1;
     min-width: 120px;
-    margin-right: 0; /* Remove default button margin */
+    margin-right: 0;
 }
 
 .game-settings label {
@@ -549,7 +602,7 @@ button:disabled {
 
 /* Central Auction Area */
 .main-auction-area {
-    display: flex; /* Ensure it's flexed by default */
+    display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
@@ -558,7 +611,7 @@ button:disabled {
 }
 .central-auction-item {
     width: 100%;
-    min-height: 300px; /* Ensure minimum size */
+    min-height: 300px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -653,27 +706,63 @@ button:disabled {
 }
 
 /* LLM Assistant Section */
-.llm-assistant-section {
-    padding-bottom: 1rem;
-    flex-grow: 1; /* Allow LLM section to take available height */
+/* This is now the floating AI, not embedded in panels */
+.floating-ai-assistant {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1001; /* Above other elements */
     display: flex;
     flex-direction: column;
+    align-items: flex-end; /* Align chat window to the right */
+    gap: 10px;
 }
-.llm-assistant-section h3 {
-    color: var(--info-color);
-    border-bottom-color: #666;
-    margin-top: 0;
-    margin-bottom: 0.75rem;
+
+.floating-ai-toggle {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background-color: var(--info-color);
+    color: white;
+    font-size: 1.5em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.3s ease;
+    border: none;
+    cursor: pointer;
 }
+.floating-ai-toggle:hover {
+    background-color: #1a7fb3;
+    transform: scale(1.05);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.4);
+}
+.floating-ai-toggle.active {
+    background-color: var(--accent-gold); /* Change color when chat is open */
+    transform: scale(1);
+}
+
+
 .llm-chat-window {
     display: flex;
     flex-direction: column;
-    height: 300px; /* Default height, can flex-grow if needed */
+    width: 300px; /* Fixed width for floating chat */
+    height: 400px; /* Fixed height for floating chat */
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: 10px; /* More rounded corners for floating style */
     overflow: hidden;
-    flex-grow: 1; /* Allow chat window to grow */
+    background-color: var(--secondary-bg); /* Use secondary bg for chat window */
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+    transition: all 0.3s ease-in-out;
+    /* Animation for appearing */
+    transform-origin: bottom right;
+    animation: fadeInScale 0.3s ease-out forwards;
 }
+.floating-ai-assistant .llm-chat-window[style*="display: none"] {
+    animation: fadeOutScale 0.3s ease-in forwards;
+}
+
 .llm-messages {
     flex-grow: 1;
     overflow-y: auto;
@@ -703,7 +792,7 @@ button:disabled {
     display: flex;
     border-top: 1px solid var(--border-color);
     padding: 0.75rem;
-    background-color: var(--secondary-bg);
+    background-color: var(--tertiary-bg); /* Lighter for input area */
     flex-shrink: 0;
 }
 .llm-input-area input {
@@ -712,6 +801,8 @@ button:disabled {
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
     padding: 0.6rem 0.8rem;
+    background-color: var(--secondary-bg); /* Darker input field */
+    color: var(--light-text);
 }
 .llm-input-area button {
     margin-left: 0.5rem;
@@ -741,7 +832,7 @@ button:disabled {
 .player-scores-container {
     flex-grow: 1;
     overflow-y: auto;
-    max-height: 100%; /* Take full height of parent panel */
+    max-height: 100%;
 }
 
 .player-score-card {
@@ -825,6 +916,15 @@ button:disabled {
     from { box-shadow: 0 0 15px rgba(244, 67, 54, 0.5); }
     to { box-shadow: 0 0 25px rgba(244, 67, 54, 0.9); }
 }
+@keyframes fadeInScale {
+    from { opacity: 0; transform: scale(0.8); }
+    to { opacity: 1; transform: scale(1); }
+}
+@keyframes fadeOutScale {
+    from { opacity: 1; transform: scale(1); }
+    to { opacity: 0; transform: scale(0.8); }
+}
+
 
 /* Scrollbar Styling */
 .item-list::-webkit-scrollbar, .llm-messages::-webkit-scrollbar, .player-scores-container::-webkit-scrollbar, .tab-content::-webkit-scrollbar {
@@ -845,7 +945,7 @@ button:disabled {
 /* Responsive adjustments */
 @media (max-width: 1200px) {
     .game-container {
-        grid-template-columns: 1fr; /* Single column layout */
+        grid-template-columns: 1fr;
         grid-template-areas:
             "left-panel"
             "main-content"
@@ -856,10 +956,10 @@ button:disabled {
     }
 
     .panel {
-        max-width: 90%; /* Take more width when stacked */
+        max-width: 90%;
         min-width: unset;
-        width: 100%; /* Fill available space */
-        max-height: unset; /* Remove fixed max-height when stacked */
+        width: 100%;
+        max-height: unset;
     }
 
     /* Order when stacked: Player/Auctioneer, Main Auction, Scoreboard */
@@ -867,8 +967,11 @@ button:disabled {
     .main-auction-area { order: 2; }
     .scoreboard-panel { order: 3; }
 
+    /* Ensure tab content has a max-height and scrolls if needed */
+    .player-panel .tab-content,
     .auctioneer-panel .tab-content {
-        max-height: 400px; /* Give tab content a max height for scrolling when stacked */
+        max-height: 400px; /* Example max-height for tab content in stacked mode */
+        min-height: 200px; /* Ensure a minimum visible height */
     }
 }
 
@@ -909,6 +1012,27 @@ button:disabled {
     }
     .tab-button {
         padding: 0.5rem 0.2rem;
-        font-size: 0.85em;
+        font-size: 1em; /* Smaller icons on very small screens */
+    }
+    /* Ensure icon-only display on small screens for tabs */
+    .tab-button i {
+        margin-right: 0;
+    }
+    .tab-button .tab-text {
+        display: none;
+    }
+
+    .floating-ai-assistant {
+        bottom: 10px;
+        right: 10px;
+    }
+    .floating-ai-toggle {
+        width: 45px;
+        height: 45px;
+        font-size: 1.3em;
+    }
+    .llm-chat-window {
+        width: 280px;
+        height: 350px;
     }
 }
