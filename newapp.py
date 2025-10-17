@@ -21,18 +21,22 @@ model = genai.GenerativeModel(GEMINI_MODEL_NAME)
 app = Flask(__name__)
 
 # --- Game State ---
-game_state = {
-    "participants": {},  # {player_name: budget}
-    "player_items": {},  # {player_name: [item1, item2]}
-    "item_list": [],     # List of items to be auctioned
-    "auction_history": [], # List of past events/bids
-    "current_item": None,
-    "current_bid": 0,
-    "high_bidder": None,
-    "status": "waiting_for_init", # waiting_for_init, waiting_for_items, bidding, item_sold, game_over, waiting_for_auction_start
-    "chat_log": [],      # For displaying chat messages in the UI
-    "last_processed_action": None # To prevent reprocessing same action from Gemini
-}
+# Define a function to get the initial game state, allowing for easy reset
+def get_initial_game_state():
+    return {
+        "participants": {},  # {player_name: budget}
+        "player_items": {},  # {player_name: [item1, item2]}
+        "item_list": [],     # List of items to be auctioned
+        "auction_history": [], # List of past events/bids (e.g., "ItemX sold to PlayerY for Z credits")
+        "current_item": None,
+        "current_bid": 0,
+        "high_bidder": None,
+        "status": "waiting_for_init", # waiting_for_init, waiting_for_items, bidding, item_sold, game_over, waiting_for_auction_start
+        "chat_log": [{"sender": "Auctioneer", "message": "Welcome to the AI Auctioneer Game! To begin, type: `Start a new auction game with players John, Jane, Mike, and a budget of 100 for everyone.` (Or add your own player names and budget!)"}],      # For displaying chat messages in the UI
+        "last_processed_action": None # To prevent reprocessing same action from Gemini
+    }
+
+game_state = get_initial_game_state()
 
 # --- Gemini Interaction Functions ---
 
@@ -47,7 +51,7 @@ def generate_gemini_response(user_input, current_game_state_for_gemini):
     Current Game State:
     Status: {current_game_state_for_gemini['status']}
     Participants: {json.dumps(current_game_state_for_gemini['participants'])}
-    Items Available: {json.dumps(current_game_state_for_gemini['item_list'])}
+    Items Available for Auction: {json.dumps(current_game_state_for_gemini['item_list'])}
     Current Item for Auction: {current_game_state_for_gemini['current_item']}
     Current Bid: {current_game_state_for_gemini['current_bid']}
     High Bidder: {current_game_state_for_gemini['high_bidder']}
@@ -79,9 +83,10 @@ def generate_gemini_response(user_input, current_game_state_for_gemini):
         `GAME_ACTION: {{"type": "bid", "player": "Player Name", "amount": 5}}`
         *Ensure bid is valid (>= current_bid + 1 and within budget)*
 
-    5.  **Sell Item:** When an item is sold to the high bidder.
+    5.  **Sell Item:** When an item is sold. This can be to the high bidder, or if no bids, potentially for 0 credits to a named player, or if everyone passes, the item might be declared 'unsold'.
         `GAME_ACTION: {{"type": "sell_item", "player": "Player Name", "amount": 10, "item": "Item Name"}}`
-        *This action should only be triggered after bidding has concluded for an item.*
+        *If no bids, the 'player' and 'amount' can be from user explicit instruction (e.g., "sell to John for 0"), or inferred (if all pass, it's unsold)*
+        *If no player or amount is provided by the user, and no bids, the system will handle it as 'unsold'.*
 
     6.  **Player Passes:** When a player explicitly passes their turn or passes on an item.
         `GAME_ACTION: {{"type": "pass", "player": "Player Name"}}`
@@ -111,9 +116,13 @@ def generate_gemini_response(user_input, current_game_state_for_gemini):
     You: "A bold opening bid of 5 credits from John! The current high bid stands at 5. Any other contenders?
     GAME_ACTION: {{"type": "bid", "player": "John", "amount": 5}}"
     
-    User: "Sell it!"
+    User: "Sell it!" (Assuming John is high bidder at 5)
     You: "Sold! The Old Vase goes to John for 5 credits! John's new budget is 95.
     GAME_ACTION: {{"type": "sell_item", "player": "John", "amount": 5, "item": "Old Vase"}}"
+
+    User: "No one bids, just sell the item." (Assuming current_item is "Rare Painting", no current bid)
+    You: "As there are no bids on the Rare Painting, it remains unsold for now. Perhaps it will return later, or maybe we move on.
+    GAME_ACTION: {{"type": "sell_item", "item": "Rare Painting", "player": null, "amount": 0}}"
     
     Strictly adhere to this format. Do not invent other GAME_ACTION types.
     """
@@ -168,9 +177,11 @@ def apply_game_action(action):
 
     action_type = action.get("type")
 
-    # Prevent reprocessing the same action if Gemini repeats it due to context
+    # Prevent reprocessing the same action if Gemini repeats it due to context,
+    # EXCEPT for start_item_auction, where Gemini might re-announce.
+    # The start_item_auction logic itself will handle if the item is already current.
     action_hash = hash(json.dumps(action, sort_keys=True))
-    if action_hash == game_state["last_processed_action"] and action_type != "start_item_auction": # Allow start_item_auction to be called multiple times if items are added incrementally
+    if action_hash == game_state["last_processed_action"] and action_type != "start_item_auction":
         print(f"Skipping duplicate action: {action_type}")
         return "Duplicate action skipped."
     game_state["last_processed_action"] = action_hash
@@ -178,7 +189,7 @@ def apply_game_action(action):
     if action_type == "init_game":
         players = action.get("players")
         budget = action.get("budget")
-        if not players or not budget:
+        if not players or budget is None:
             return "Error: Missing players or budget for init_game."
         
         game_state["participants"] = {p: budget for p in players}
@@ -193,24 +204,15 @@ def apply_game_action(action):
         if not items:
             return "Error: No items provided for add_items."
         
-        # Ensure items are added to the general list, not just a player's
-        # Filter out empty strings from items
         items_to_add = [item.strip() for item in items if item.strip()]
         game_state["item_list"].extend(items_to_add)
-        game_state["status"] = "waiting_for_auction_start" if game_state["status"] != "bidding" else game_state["status"]
+        game_state["status"] = "waiting_for_auction_start" if not game_state["current_item"] else game_state["status"]
         game_state["chat_log"].append({"sender": "System", "message": f"Items added: {', '.join(items_to_add)}."})
         
-        # If the game is ready and not currently bidding, and there's a current item, start auction if items were just added
         if game_state["status"] == "waiting_for_auction_start" and not game_state["current_item"] and game_state["item_list"]:
             first_item = game_state["item_list"][0]
-            # Prompt Gemini to start the auction for the first item
-            # This is a bit of a "hack" to get Gemini to issue the "start_item_auction" action
-            # for the first item after items are added.
-            # Alternatively, we could directly call apply_game_action here, but letting Gemini drive
-            # ensures its narrative is aligned.
             game_state["chat_log"].append({"sender": "Auctioneer", "message": f"Excellent, items have been added! Shall we begin the auction for '{first_item}' now?"})
             game_state["chat_log"].append({"sender": "System", "message": "You can now type 'Start auction for the first item.' or 'Start auction for [Item Name]'."})
-
 
         return f"Added {len(items_to_add)} items."
 
@@ -219,20 +221,19 @@ def apply_game_action(action):
         if not item_name:
             return "Error: Missing item name for start_item_auction."
         
-        # Find and set the item. Remove it from the list of available items.
+        if game_state["current_item"] == item_name:
+            return f"Auction for '{item_name}' is already underway."
+        
         if item_name in game_state["item_list"]:
             game_state["current_item"] = item_name
-            game_state["item_list"].remove(item_name)
-            game_state["current_bid"] = 0 # Bids start from 1, but internal current bid can be 0 initially
+            # Do NOT remove from item_list yet, it will be removed on sell/unsold
+            game_state["current_bid"] = 0 
             game_state["high_bidder"] = None
             game_state["status"] = "bidding"
             game_state["chat_log"].append({"sender": "System", "message": f"Auction for '{item_name}' has started! Current bid: {game_state['current_bid']}"})
             return f"Auction started for '{item_name}'."
-        elif game_state["current_item"] == item_name:
-            # Item is already being auctioned (e.g., Gemini might re-announce)
-            return f"Auction for '{item_name}' is already underway."
         else:
-            return f"Error: Item '{item_name}' not found in available items. Available: {', '.join(game_state['item_list'])}"
+            return f"Error: Item '{item_name}' not found in available items or already auctioned. Available: {', '.join(game_state['item_list'])}"
 
     elif action_type == "bid":
         player = action.get("player")
@@ -242,12 +243,12 @@ def apply_game_action(action):
             return "Error: Missing player or amount for bid."
         if player not in game_state["participants"]:
             return f"Error: Player '{player}' not recognized. Current participants: {', '.join(game_state['participants'].keys())}"
+        if game_state["current_item"] is None:
+             return "Error: No item is currently being auctioned to bid on."
         if amount <= game_state["current_bid"]:
             return f"Error: Bid of {amount} is not higher than current bid of {game_state['current_bid']}. Minimum bid is {game_state['current_bid'] + 1}."
         if amount > game_state["participants"][player]:
             return f"Error: Player '{player}' does not have enough budget ({game_state['participants'][player]}) for a bid of {amount}."
-        if game_state["current_item"] is None:
-             return "Error: No item is currently being auctioned."
         
         game_state["current_bid"] = amount
         game_state["high_bidder"] = player
@@ -255,63 +256,68 @@ def apply_game_action(action):
         return f"Bid updated: {player} at {amount}."
 
     elif action_type == "sell_item":
-        # Prioritize current game state for selling if Gemini's info is slightly off
-        actual_player = game_state["high_bidder"]
-        actual_amount = game_state["current_bid"]
-        actual_item = game_state["current_item"]
-
-        if game_state["current_item"] is None:
-             return "Error: No item is currently under auction to be sold."
-
-        if not actual_player or actual_amount == 0:
-            return f"Error: Cannot sell '{actual_item}' as there is no high bidder or bid is 0."
-
-        if actual_player not in game_state["participants"]:
-            return f"Error: Player '{actual_player}' not found to sell item."
-        if game_state["participants"][actual_player] < actual_amount:
-            return f"Error: Player '{actual_player}' cannot afford {actual_amount} credits for '{actual_item}'."
+        # Get actual state. Gemini might send preferred player/amount, but actual game state takes precedence if different
+        item_to_sell = game_state["current_item"]
         
-        game_state["participants"][actual_player] -= actual_amount
-        game_state["player_items"][actual_player].append(actual_item)
-        game_state["auction_history"].append(f"'{actual_item}' sold to {actual_player} for {actual_amount} credits.")
-        
-        # Add a system message for the sale BEFORE attempting to start the next auction
-        sale_message = f"'{actual_item}' sold to {actual_player} for {actual_amount} credits. {actual_player}'s new budget: {game_state['participants'][actual_player]}."
-        game_state["chat_log"].append({"sender": "System", "message": sale_message})
+        # If Gemini explicitly sends player/amount for sale, use that
+        proposed_player = action.get("player")
+        proposed_amount = action.get("amount")
 
+        actual_player = game_state["high_bidder"] if game_state["high_bidder"] else proposed_player
+        actual_amount = game_state["current_bid"] if game_state["current_bid"] > 0 else (proposed_amount if proposed_amount is not None else 0)
+
+        if item_to_sell is None:
+             return "Error: No item is currently under auction to be sold or declared unsold."
+
+        # Remove item from the general list regardless of sale status
+        if item_to_sell in game_state["item_list"]:
+            game_state["item_list"].remove(item_to_sell)
+        
+        if actual_player and actual_player in game_state["participants"] and actual_amount > 0:
+            # Valid sale with a bidder and a positive amount
+            if game_state["participants"][actual_player] < actual_amount:
+                # This should ideally be caught by bid validation, but as a safeguard
+                sale_message = f"Error: Player '{actual_player}' cannot afford {actual_amount} credits for '{item_to_sell}'. Item declared unsold."
+                game_state["chat_log"].append({"sender": "System", "message": sale_message})
+                game_state["auction_history"].append(f"'{item_to_sell}' was declared UNSOLD (affordability issue).")
+            else:
+                game_state["participants"][actual_player] -= actual_amount
+                game_state["player_items"][actual_player].append(item_to_sell)
+                game_state["auction_history"].append(f"'{item_to_sell}' sold to {actual_player} for {actual_amount} credits.")
+                sale_message = f"'{item_to_sell}' sold to {actual_player} for {actual_amount} credits. {actual_player}'s new budget: {game_state['participants'][actual_player]}."
+                game_state["chat_log"].append({"sender": "System", "message": sale_message})
+        else:
+            # Item is declared unsold (no bids, or player explicitly passed, or player cannot afford)
+            game_state["auction_history"].append(f"'{item_to_sell}' was declared UNSOLD (no valid bids or explicit passing).")
+            game_state["chat_log"].append({"sender": "System", "message": f"'{item_to_sell}' declared UNSOLD. No valid bids were received."})
+        
+        # Reset current auction state
         game_state["current_item"] = None
         game_state["current_bid"] = 0
         game_state["high_bidder"] = None
         
         if not game_state["item_list"]:
             game_state["status"] = "game_over"
-            game_state["chat_log"].append({"sender": "System", "message": "All items sold! Game Over."})
-            return "Game Over: All items sold."
+            game_state["chat_log"].append({"sender": "System", "message": "All items sold or declared unsold! Game Over."})
+            return "Game Over: All items processed."
         else:
-            # Automatically start auction for the next item
-            next_item = game_state["item_list"][0] # Just peek the next item for Gemini's prompt
+            # Attempt to automatically start auction for the next item
+            next_item = game_state["item_list"][0]
 
-            # Craft a message to Gemini to prompt it to automatically start the next auction
-            auto_prompt_for_gemini = f"The previous item '{actual_item}' was sold. Please start the auction for the next available item, which is '{next_item}'."
+            auto_prompt_for_gemini = f"The previous item '{item_to_sell}' was processed. Please start the auction for the next available item, which is '{next_item}'."
             
-            # Send this programmatic message to Gemini for its narrative and to trigger the next GAME_ACTION
             gemini_raw_response_for_auto = generate_gemini_response(auto_prompt_for_gemini, {k: v for k, v in game_state.items() if k != "chat_log"})
             narrative_for_auto, game_action_for_auto = parse_gemini_response(gemini_raw_response_for_auto)
 
             game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative_for_auto})
 
             if game_action_for_auto and game_action_for_auto.get("type") == "start_item_auction" and game_action_for_auto.get("item") == next_item:
-                # If Gemini correctly understood and sent the start_item_auction action for the next item
-                # we process it directly. The recursive call will handle state update and add its own System message.
                 result_of_auto_start = apply_game_action(game_action_for_auto)
-                return f"Item '{actual_item}' sold to {actual_player}. Auction for '{next_item}' automatically started. ({result_of_auto_start})"
+                return f"Item '{item_to_sell}' processed. Auction for '{next_item}' automatically started. ({result_of_auto_start})"
             else:
-                # Fallback if Gemini doesn't issue the correct action, e.g., if it just narrates.
-                # In this case, the user might need to manually tell it to start the next item.
-                game_state["status"] = "waiting_for_auction_start" # Set to waiting for explicit start
+                game_state["status"] = "waiting_for_auction_start" 
                 game_state["chat_log"].append({"sender": "System", "message": f"Automatic auction start failed for '{next_item}'. Please manually start the auction for it."})
-                return f"Item '{actual_item}' sold to {actual_player}. Next item '{next_item}' is pending manual start."
-
+                return f"Item '{item_to_sell}' processed. Next item '{next_item}' is pending manual start."
 
     elif action_type == "pass":
         player = action.get("player")
@@ -326,7 +332,6 @@ def apply_game_action(action):
         return f"{player} passed."
 
     elif action_type == "no_action" or action_type == "parsing_error":
-        # Gemini just provided narrative or had a parsing error, no state change
         return f"Gemini narrative only or parsing error: {action.get('message', '')}"
 
     else:
@@ -337,7 +342,6 @@ def apply_game_action(action):
 @app.route('/')
 def index():
     """Serves the main HTML page."""
-    # The HTML content is embedded directly here
     return render_template_string(HTML_CONTENT)
 
 @app.route('/process_chat', methods=['POST'])
@@ -352,23 +356,20 @@ def process_chat():
 
     game_state["chat_log"].append({"sender": "You", "message": user_input})
 
-    # Prepare a copy of game_state for Gemini, excluding chat_log to avoid prompt bloat
     gemini_friendly_state = {k: v for k, v in game_state.items() if k != "chat_log"}
 
     gemini_raw_response = generate_gemini_response(user_input, gemini_friendly_state)
     narrative, game_action = parse_gemini_response(gemini_raw_response)
 
-    # Add Gemini's narrative to chat log
     game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
 
-    # Apply game action if present
     if game_action:
         action_result = apply_game_action(game_action)
-        # Only add a system message if the action wasn't a narrative-only or parsing error
         if game_action.get("type") not in ["no_action", "parsing_error"]:
-            game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result}"})
+            # Only add a system message if it was a real action, not just a narrative or parsing error
+            if not action_result.startswith("Duplicate action skipped"): # Avoid adding system message for skipped duplicates
+                game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result}"})
     
-    # Return the entire game state for the client to render
     return jsonify({
         "success": True,
         "narrative": narrative,
@@ -404,13 +405,12 @@ def upload_items():
             if not items:
                 return jsonify({"success": False, "message": "No valid items found in the file."}), 400
             
-            # Apply the game action to add items
             action_result = apply_game_action({"type": "add_items", "items": items})
             
             return jsonify({
                 "success": True,
                 "message": f"{len(items)} items uploaded successfully.",
-                "game_state": game_state # Return updated state
+                "game_state": game_state 
             })
 
         except Exception as e:
@@ -419,9 +419,22 @@ def upload_items():
     else:
         return jsonify({"success": False, "message": "Invalid file type. Please upload a .csv or .txt file."}), 400
 
+@app.route('/reset_game', methods=['POST'])
+def reset_game():
+    """
+    Resets the entire game state to its initial values.
+    """
+    global game_state
+    game_state = get_initial_game_state()
+    game_state["chat_log"].append({"sender": "System", "message": "Game has been reset. Start a new auction!"})
+    return jsonify({
+        "success": True,
+        "message": "Game state reset.",
+        "game_state": game_state
+    })
 
 @app.route('/get_game_state', methods=['GET'])
-def get_game_state():
+def get_game_state_route():
     """
     Returns the current full game state. Useful for initial load and periodic updates.
     """
@@ -436,244 +449,565 @@ HTML_CONTENT = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Auctioneer Game</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --primary-color: #4CAF50; /* Green */
+            --secondary-color: #388E3C; /* Darker Green */
+            --accent-color: #FFC107; /* Amber */
+            --background-light: #F1F8E9; /* Lightest Green */
+            --background-medium: #E8F5E9; /* Very Light Green */
+            --text-color: #212121;
+            --border-color: #C8E6C9; /* Light Green Border */
+            --shadow-light: 0 2px 5px rgba(0, 0, 0, 0.1);
+            --shadow-medium: 0 5px 15px rgba(0, 0, 0, 0.08);
+            --success-color: #27ae60;
+            --info-color: #2196F3; /* Blue Info */
+            --warning-color: #FBC02D; /* Darker Amber Warning */
+            --error-color: #D32F2F; /* Red Error */
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Roboto', sans-serif;
             margin: 0;
-            padding: 20px;
-            background-color: #f4f7f6;
-            color: #333;
+            padding: 0;
+            background-color: var(--background-light);
+            color: var(--text-color);
             display: flex;
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
-        .container {
-            display: flex;
-            width: 90%;
-            max-width: 1200px;
-            background-color: #fff;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-            border-radius: 10px;
-            overflow: hidden; /* Important for containing internal scrollable content */
-            margin-bottom: 20px;
-            min-height: 650px; /* Set a minimum height for the entire game area */
-        }
-        .game-info, .chat-interface {
-            padding: 25px;
-            box-sizing: border-box;
-            height: 100%; /* Fill the container's height */
-            display: flex; /* Make children flex containers */
-            flex-direction: column; /* Stack children vertically */
-        }
-        .game-info {
-            flex: 1; /* Left panel takes 1 part of available width */
-            border-right: 1px solid #eee;
-            background-color: #fcfcfc;
-        }
-        .chat-interface {
-            flex: 2; /* Right panel takes 2 parts of available width */
-            background-color: #fff;
-        }
+
         h1, h2, h3 {
-            color: #2c3e50;
+            font-family: 'Montserrat', sans-serif;
+            color: var(--secondary-color);
             margin-top: 0;
-            border-bottom: 2px solid #3498db;
-            padding-bottom: 5px;
-            margin-bottom: 15px;
-            flex-shrink: 0; /* Prevent titles from shrinking */
+            margin-bottom: 1rem;
+            font-weight: 600;
         }
-        .status-message,
-        .current-auction-item,
-        .item-upload {
-            flex-shrink: 0; /* Prevent these sections from shrinking */
-            margin-bottom: 15px;
+
+        h1 {
+            font-size: 2.8em;
+            color: var(--primary-color);
+            text-shadow: var(--shadow-light);
+            margin-bottom: 25px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--primary-color);
         }
-        .current-auction-item {
-            background-color: #e8f6f3;
+
+        h2 {
+            font-size: 1.8em;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+            margin-bottom: 15px;
+            color: var(--secondary-color);
+        }
+
+        h3 {
+            font-size: 1.3em;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr 2fr; /* Left, Middle, Right panels */
+            gap: 20px;
+            width: 95%;
+            max-width: 1400px;
+            background-color: #fff;
+            box-shadow: var(--shadow-medium);
+            border-radius: 12px;
+            overflow: hidden; /* Important for fixed chat input not breaking layout */
+            margin-bottom: 25px;
+            min-height: 750px;
+            padding: 20px;
+        }
+
+        .left-panel, .center-panel, .right-panel {
+            padding: 20px;
+            background-color: var(--background-medium);
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border-color);
+        }
+        .right-panel {
+            position: relative; /* For sticky chat input */
+        }
+
+        .panel-section {
+            background-color: #fff;
             padding: 15px;
             border-radius: 8px;
-            border: 1px solid #d1ede8;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            border: 1px solid var(--border-color);
+            flex-shrink: 0; /* Prevent sections from shrinking excessively */
         }
-        .current-auction-item p {
-            margin: 5px 0;
+        .panel-section:last-child {
+            margin-bottom: 0;
         }
-        
-        /* New styling for scrollable list wrappers */
-        .scrollable-list-wrapper {
-            flex: 1; /* These take up equal remaining space */
-            overflow-y: auto; /* Enable vertical scrolling */
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 10px; /* Inner padding for the scrollable area */
-            background-color: #f9f9f9;
+
+        /* Specific section styles */
+        .game-status-section {
+            margin-bottom: 20px;
+        }
+
+        .status-message {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 12px;
+            border-radius: 6px;
             margin-bottom: 15px;
-            min-height: 50px; /* Ensure a minimum visible height */
+            font-weight: 500;
+            text-align: center;
+            box-shadow: var(--shadow-light);
+            font-family: 'Montserrat', sans-serif;
+        }
+        .status-message.info { background-color: var(--info-color); }
+        .status-message.warning { background-color: var(--warning-color); }
+        .status-message.error { background-color: var(--error-color); }
+
+        .current-auction-section {
+            margin-bottom: 20px;
+        }
+        .current-auction-section p {
+            margin: 8px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-right: 5px;
+        }
+        .current-auction-section strong {
+            color: var(--secondary-color);
+        }
+        .current-auction-section span {
+            font-weight: 500;
+            color: var(--primary-color);
+        }
+
+        .item-upload-section {
+            margin-top: auto; /* Push to bottom in left panel */
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .item-upload-section input[type="file"] {
+            display: block;
+            margin: 15px auto;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            width: calc(100% - 20px);
+            max-width: 300px;
+            background-color: #fcfcfc;
+        }
+        .item-upload-section p {
+            font-size: 0.9em;
+            color: #777;
+            margin-top: 5px;
+        }
+
+        .scrollable-list-wrapper {
+            flex: 1; /* Allow these sections to grow and take space if in flex parent */
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background-color: #fdfdfd;
+            padding: 10px;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.03);
+            min-height: 100px; /* Ensure a minimum visible height */
+            max-height: 250px; /* Cap height to prevent stretching */
+            margin-bottom: 10px; /* Space from other sections */
+        }
+        /* Override specific scrollable lists if needed for initial appearance */
+        #participants-list-wrapper, #player-inventories-list-wrapper, #items-remaining-list-wrapper, #auction-history-list-wrapper {
+            flex-grow: 1; /* Allow these to fill space within their parent */
+            max-height: 200px; /* Further adjust max-height for balanced layout */
         }
         .scrollable-list-wrapper ul {
             list-style-type: none;
-            padding: 0; /* Remove default ul padding */
-            margin: 0; /* Remove default ul margin */
+            padding: 0;
+            margin: 0;
         }
         .scrollable-list-wrapper li {
-            padding: 8px 0;
+            padding: 10px 5px;
             border-bottom: 1px dashed #eee;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            font-size: 0.95em;
         }
         .scrollable-list-wrapper li:last-child {
             border-bottom: none;
         }
+        .scrollable-list-wrapper li:nth-child(even) {
+            background-color: #f4f4f4;
+        }
+        .scrollable-list-wrapper li.player-inventory-header {
+            font-weight: bold;
+            background-color: var(--background-medium);
+            padding: 8px 5px;
+            border-bottom: 2px solid var(--primary-color);
+            margin-top: 10px;
+            font-family: 'Montserrat', sans-serif;
+            color: var(--secondary-color);
+            position: sticky; /* Make header sticky if scrolling within player inventory */
+            top: 0;
+            z-index: 10;
+        }
+        .scrollable-list-wrapper li.player-inventory-item {
+            font-style: italic;
+            padding-left: 20px;
+            color: #555;
+            justify-content: flex-start;
+        }
+
 
         .player-budget {
-            font-weight: bold;
-            color: #27ae60;
+            font-weight: 600;
+            color: var(--primary-color);
         }
-        
+        .player-item-count {
+            font-size: 0.8em;
+            color: #777;
+            margin-left: 10px;
+        }
+
         .chat-log {
-            flex: 1; /* Allow chat log to take remaining space */
+            flex: 1; /* Allow chat log to take up available space */
             overflow-y: auto;
-            border: 1px solid #e0e0e0;
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 15px;
-            background-color: #f9f9f9;
-            margin-bottom: 15px;
-            min-height: 300px; /* Ensure minimum visible height for chat */
+            background-color: #fff;
+            margin-bottom: 20px; /* Space above input */
             display: flex;
             flex-direction: column;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.03);
+            min-height: 400px;
+            scroll-behavior: smooth;
         }
         .chat-message {
-            margin-bottom: 10px;
-            line-height: 1.5;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            max-width: 90%;
+            word-wrap: break-word;
+            font-size: 0.95em;
+        }
+        .chat-message:last-child {
+            margin-bottom: 0;
         }
         .chat-message strong {
-            color: #3498db;
+            font-family: 'Montserrat', sans-serif;
+            font-weight: 600;
+            margin-right: 5px;
+        }
+        .chat-message.You {
+            background-color: #e8f5e9; /* Light green */
+            align-self: flex-end;
+            text-align: right;
+            border-bottom-right-radius: 0;
         }
         .chat-message.You strong {
-            color: #e67e22;
+            color: var(--accent-color);
+        }
+        .chat-message.Auctioneer {
+            background-color: #e3f2fd; /* Light blue */
+            align-self: flex-start;
+            text-align: left;
+            border-bottom-left-radius: 0;
         }
         .chat-message.Auctioneer strong {
-            color: #9b59b6;
+            color: var(--primary-color);
+        }
+        .chat-message.System {
+            background-color: #fffde7; /* Light yellow */
+            align-self: center;
+            text-align: center;
+            color: #555;
+            font-style: italic;
+            border: 1px dashed #ffe082;
+            width: 100%;
+            max-width: none; /* Allow system messages to span full width */
         }
         .chat-message.System strong {
-            color: #1abc9c;
+            color: var(--info-color);
         }
+
         .chat-input {
             display: flex;
-            border-top: 1px solid #eee;
             padding-top: 15px;
-            flex-shrink: 0; /* Keep input fixed height at bottom */
-            margin-top: auto; /* Pushes input to the bottom in a flex column */
+            flex-shrink: 0; /* Prevent input from shrinking */
+            margin-top: auto; /* Push to bottom */
+            border-top: 1px solid var(--border-color);
+            background-color: var(--background-medium); /* Match panel background */
+            padding-bottom: 5px; /* Add some padding at the bottom */
         }
         .chat-input input[type="text"] {
             flex: 1;
-            padding: 12px;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            font-size: 1em;
-            margin-right: 10px;
+            padding: 14px 18px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 1.05em;
+            margin-right: 12px;
+            transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            background-color: #fdfdfd;
         }
-        .chat-input button {
-            padding: 12px 20px;
-            background-color: #3498db;
+        .chat-input input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2); /* Green focus shadow */
+        }
+        
+        button {
+            padding: 14px 25px;
+            background-color: var(--primary-color);
             color: white;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
-            font-size: 1em;
-            transition: background-color 0.2s;
+            font-size: 1.05em;
+            font-weight: 600;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+            box-shadow: var(--shadow-light);
+            flex-shrink: 0; /* Prevent button from shrinking */
         }
-        .chat-input button:hover {
-            background-color: #2980b9;
+        button:hover {
+            background-color: var(--secondary-color); /* Darker primary */
+            transform: translateY(-1px);
         }
+        button:active {
+            transform: translateY(0);
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+        .item-upload-section button {
+            background-color: var(--info-color); /* Use info color for upload */
+        }
+        .item-upload-section button:hover {
+            background-color: #1976D2; /* Darker info */
+        }
+        .reset-game-button {
+            background-color: var(--error-color); /* Red for reset */
+            margin-top: 20px;
+            width: 100%;
+        }
+        .reset-game-button:hover {
+            background-color: #C62828; /* Darker red */
+        }
+
         .game-over-message {
             text-align: center;
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #e74c3c;
-            margin-top: 20px;
+            font-size: 1.8em;
+            font-weight: 700;
+            color: var(--error-color);
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #ffebee; /* Light red background */
+            border-radius: 10px;
+            border: 2px solid var(--error-color);
+            box-shadow: var(--shadow-medium);
         }
-        .status-message {
-            background-color: #dbe4f0;
-            color: #2c3e50;
-            padding: 10px;
-            border-radius: 5px;
-            margin-bottom: 15px;
-            font-weight: bold;
-            text-align: center;
-        }
-        .item-upload {
-            margin-top: 0; /* Adjusted as flex item */
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-            text-align: center;
-        }
-        .item-upload input[type="file"] {
-            display: block;
-            margin: 10px auto;
-            padding: 5px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            width: 80%;
-            max-width: 300px;
-        }
-        .item-upload button {
-            background-color: #27ae60;
-            margin-top: 10px;
-        }
-        .item-upload button:hover {
-            background-color: #229954;
-        }
+        
         footer {
-            margin-top: 20px;
-            color: #777;
+            margin-top: 30px;
+            padding: 20px;
+            color: #888;
             font-size: 0.9em;
+            text-align: center;
+            border-top: 1px solid var(--border-color);
+            width: 90%;
+            max-width: 1400px;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 1200px) {
+            .container {
+                grid-template-columns: 1.5fr 2fr; /* Two columns: Left+Middle, Right */
+                grid-template-areas:
+                    "info chat"
+                    "lists chat";
+                max-width: 1000px;
+            }
+            .left-panel {
+                grid-area: info;
+            }
+            .center-panel {
+                grid-area: lists;
+                flex-direction: column; /* Stack sections in center panel */
+            }
+            .right-panel {
+                grid-area: chat;
+            }
+            #participants-list-wrapper, #player-inventories-list-wrapper, #items-remaining-list-wrapper, #auction-history-list-wrapper {
+                max-height: 180px; /* Adjust max-height for smaller vertical space */
+            }
+        }
+
+        @media (max-width: 900px) {
+            .container {
+                grid-template-columns: 1fr; /* Single column layout */
+                grid-template-areas:
+                    "info"
+                    "lists"
+                    "chat";
+                padding: 15px;
+                gap: 15px;
+            }
+            h1 {
+                font-size: 2em;
+            }
+            .left-panel, .center-panel, .right-panel {
+                padding: 15px;
+            }
+            .chat-log {
+                min-height: 300px;
+                margin-bottom: 15px;
+            }
+            .chat-input {
+                padding-top: 10px;
+                padding-bottom: 0;
+            }
+            .chat-input input[type="text"], button {
+                padding: 12px 15px;
+                font-size: 0.95em;
+            }
+            #participants-list-wrapper, #player-inventories-list-wrapper, #items-remaining-list-wrapper, #auction-history-list-wrapper {
+                max-height: 150px; /* Further adjust max-height */
+            }
+        }
+
+        @media (max-width: 600px) {
+            h1 {
+                font-size: 1.8em;
+                margin-bottom: 15px;
+            }
+            h2 {
+                font-size: 1.5em;
+            }
+            h3 {
+                font-size: 1.1em;
+            }
+            .container {
+                width: 100%;
+                border-radius: 0;
+                box-shadow: none;
+                padding: 10px;
+                min-height: unset;
+            }
+            .left-panel, .center-panel, .right-panel {
+                border-radius: 0;
+                border: none;
+                padding: 10px;
+            }
+            .panel-section {
+                padding: 10px;
+                border-radius: 0;
+                box-shadow: none;
+                border: none;
+                border-bottom: 1px solid var(--border-color);
+            }
+            .panel-section:last-child {
+                 border-bottom: none;
+            }
+            .chat-log {
+                padding: 10px;
+            }
+            .chat-message {
+                padding: 6px 10px;
+                margin-bottom: 8px;
+            }
+            .chat-input {
+                flex-direction: column;
+                padding-top: 10px;
+            }
+            .chat-input input[type="text"] {
+                margin-right: 0;
+                margin-bottom: 10px;
+            }
+            button {
+                width: 100%;
+            }
+            .item-upload-section input[type="file"] {
+                width: 100%;
+                max-width: none;
+            }
+            footer {
+                width: 100%;
+                border-radius: 0;
+                padding: 15px;
+                margin-top: 15px;
+            }
         }
     </style>
 </head>
 <body>
     <h1>AI Auctioneer Game</h1>
     <div class="container">
-        <div class="game-info">
-            <h2>Game Status</h2>
-            <div id="status-message" class="status-message">Loading game...</div>
+        <!-- Left Panel: Game Status & Current Auction & Item Upload -->
+        <div class="left-panel">
+            <div class="panel-section game-status-section">
+                <h2>Game Status</h2>
+                <div id="status-message" class="status-message info">Loading game...</div>
+            </div>
 
-            <div class="current-auction-item" id="current-auction-info">
+            <div class="panel-section current-auction-section">
                 <h3>Current Auction</h3>
                 <p><strong>Item:</strong> <span id="auction-item">None</span></p>
                 <p><strong>Current Bid:</strong> <span id="current-bid">0</span> credits</p>
                 <p><strong>High Bidder:</strong> <span id="high-bidder">None</span></p>
             </div>
-
-            <div class="player-list">
-                <h3>Participants</h3>
-                <div class="scrollable-list-wrapper"> <!-- New wrapper for scrollability -->
-                    <ul id="participants-list">
-                        <li>No participants yet. Type in chat to start.</li>
-                    </ul>
-                </div>
-            </div>
-
-            <div class="item-list">
-                <h3>Items Remaining</h3>
-                <div class="scrollable-list-wrapper"> <!-- New wrapper for scrollability -->
-                    <ul id="items-remaining-list">
-                        <li>No items yet. Type in chat or upload a file to add items.</li>
-                    </ul>
-                </div>
-            </div>
             
-            <div class="item-upload">
+            <div class="panel-section item-upload-section">
                 <h3>Upload Items from File</h3>
                 <input type="file" id="item-file-input" accept=".csv, .txt">
                 <button onclick="uploadItems()">Upload Items</button>
                 <p><i>(File should contain one item name per line)</i></p>
             </div>
 
-            <div class="auction-history">
-                <h3>Auction History</h3>
-                <div class="scrollable-list-wrapper"> <!-- New wrapper for scrollability -->
+            <div class="panel-section">
+                <button onclick="resetGame()" class="reset-game-button">Start New Game / Reset</button>
+            </div>
+        </div>
+
+        <!-- Middle Panel: Participants, Items Remaining, Player Inventories, Auction History -->
+        <div class="center-panel">
+            <div class="panel-section">
+                <h2>Participants</h2>
+                <div id="participants-list-wrapper" class="scrollable-list-wrapper">
+                    <ul id="participants-list">
+                        <li>No participants yet.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>Items Remaining</h2>
+                <div id="items-remaining-list-wrapper" class="scrollable-list-wrapper">
+                    <ul id="items-remaining-list">
+                        <li>No items yet.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>Player Inventories</h2>
+                <div id="player-inventories-list-wrapper" class="scrollable-list-wrapper">
+                    <ul id="player-inventories-list">
+                        <li>No items purchased yet.</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="panel-section">
+                <h2>Auction History</h2>
+                <div id="auction-history-list-wrapper" class="scrollable-list-wrapper">
                     <ul id="auction-history-list">
                         <li>No items sold yet.</li>
                     </ul>
@@ -681,15 +1015,11 @@ HTML_CONTENT = """
             </div>
         </div>
 
-        <div class="chat-interface">
+        <!-- Right Panel: Chat Interface -->
+        <div class="right-panel">
             <h2>Auction Chat</h2>
             <div id="chat-log" class="chat-log">
-                <!-- Chat messages will be appended here -->
-                <div class="chat-message Auctioneer">
-                    <strong>Auctioneer:</strong> Welcome to the AI Auctioneer Game!
-                    To begin, type: `Start a new auction game with players John, Jane, Mike, and a budget of 100 for everyone.`
-                    (Or add your own player names and budget!)
-                </div>
+                <!-- Chat messages will be dynamically inserted here -->
             </div>
             <div class="chat-input">
                 <input type="text" id="user-message" placeholder="Type your message or bid here...">
@@ -703,7 +1033,7 @@ HTML_CONTENT = """
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            fetchGameState();
+            fetchGameState(); // Fetch initial state on load
             document.getElementById('user-message').addEventListener('keypress', function(event) {
                 if (event.key === 'Enter') {
                     sendMessage();
@@ -718,6 +1048,7 @@ HTML_CONTENT = """
                 updateUI(data);
             } catch (error) {
                 console.error('Error fetching game state:', error);
+                // Optionally display a user-friendly error message
             }
         }
 
@@ -728,7 +1059,6 @@ HTML_CONTENT = """
 
             userMessageInput.value = ''; // Clear input field
 
-            const chatLog = document.getElementById('chat-log');
             const response = await fetch('/process_chat', {
                 method: 'POST',
                 headers: {
@@ -740,14 +1070,9 @@ HTML_CONTENT = """
             
             if (data.success) {
                 updateUI(data.game_state);
-                chatLog.scrollTop = chatLog.scrollHeight; // Scroll to bottom
             } else {
                 console.error('Error processing chat:', data.message);
-                const errorMessage = document.createElement('div');
-                errorMessage.className = 'chat-message System';
-                errorMessage.innerHTML = `<strong>System Error:</strong> ${data.message}`;
-                chatLog.appendChild(errorMessage);
-                chatLog.scrollTop = chatLog.scrollHeight;
+                addChatMessage('System Error', data.message, 'System');
             }
         }
 
@@ -772,13 +1097,7 @@ HTML_CONTENT = """
 
                 if (data.success) {
                     updateUI(data.game_state);
-                    // Add a chat message about items added from file
-                    const chatLog = document.getElementById('chat-log');
-                    const systemMessage = document.createElement('div');
-                    systemMessage.className = 'chat-message System';
-                    systemMessage.innerHTML = `<strong>System:</strong> ${data.message}`;
-                    chatLog.appendChild(systemMessage);
-                    chatLog.scrollTop = chatLog.scrollHeight;
+                    addChatMessage('System', data.message, 'System');
                 } else {
                     alert('Error uploading items: ' + data.message);
                 }
@@ -790,22 +1109,70 @@ HTML_CONTENT = """
             }
         }
 
+        async function resetGame() {
+            if (!confirm('Are you sure you want to reset the game? All current progress will be lost.')) {
+                return;
+            }
+            try {
+                const response = await fetch('/reset_game', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({}), // Empty body for a reset action
+                });
+                const data = await response.json();
+                if (data.success) {
+                    updateUI(data.game_state);
+                    // Clear existing chat log and then re-add initial messages
+                    const chatLog = document.getElementById('chat-log');
+                    chatLog.innerHTML = '';
+                    for (const chatEntry of data.game_state.chat_log) {
+                        addChatMessage(chatEntry.sender, chatEntry.message, chatEntry.sender);
+                    }
+                    chatLog.scrollTop = chatLog.scrollHeight;
+                } else {
+                    alert('Failed to reset game: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error resetting game:', error);
+                alert('Network error during game reset.');
+            }
+        }
+
+        function addChatMessage(sender, message, type) {
+            const chatLog = document.getElementById('chat-log');
+            const div = document.createElement('div');
+            div.className = `chat-message ${type}`;
+            div.innerHTML = `<strong>${sender}:</strong> ${message}`;
+            chatLog.appendChild(div);
+            chatLog.scrollTop = chatLog.scrollHeight; // Scroll to the latest message
+        }
+
         function updateUI(gameState) {
             // Update Status Message
             const statusMessageDiv = document.getElementById('status-message');
             let statusText = "Game Status: ";
+            let statusClass = "info"; 
+
             if (gameState.status === "waiting_for_init") {
-                statusText += "Waiting for game initialization (e.g., 'Start game with John, Jane, Mike, budget 100').";
+                statusText += "Waiting for game initialization.";
+                statusClass = "warning";
             } else if (gameState.status === "waiting_for_items") {
-                statusText += "Game initialized. Waiting for items (e.g., 'Add items: Vase, Ring, Scroll' or upload a file).";
+                statusText += "Game initialized. Waiting for items.";
+                statusClass = "warning";
             } else if (gameState.status === "waiting_for_auction_start") {
-                statusText += "Items added. Waiting to start auction (e.g., 'Start auction for the first item').";
+                statusText += "Items added. Waiting to start auction.";
+                statusClass = "warning";
             } else if (gameState.status === "bidding") {
                 statusText += `Auction for '${gameState.current_item}' is active.`;
+                statusClass = "success";
             } else if (gameState.status === "game_over") {
-                statusText += "Game Over - All items sold!";
+                statusText += "Game Over - All items processed!";
+                statusClass = "error";
             }
             statusMessageDiv.textContent = statusText;
+            statusMessageDiv.className = `status-message ${statusClass}`;
 
             // Update Current Auction Info
             document.getElementById('auction-item').textContent = gameState.current_item || 'None';
@@ -820,7 +1187,10 @@ HTML_CONTENT = """
             } else {
                 for (const player in gameState.participants) {
                     const li = document.createElement('li');
-                    li.innerHTML = `<span>${player}</span> <span class="player-budget">${gameState.participants[player]} credits</span>`;
+                    const ownedItemsCount = gameState.player_items[player] ? gameState.player_items[player].length : 0;
+                    li.innerHTML = `<span>${player}</span> 
+                                    <span class="player-budget">${gameState.participants[player]} credits</span>
+                                    <span class="player-item-count">(${ownedItemsCount} items)</span>`;
                     participantsList.appendChild(li);
                 }
             }
@@ -828,14 +1198,42 @@ HTML_CONTENT = """
             // Update Items Remaining List
             const itemsRemainingList = document.getElementById('items-remaining-list');
             itemsRemainingList.innerHTML = '';
-            if (gameState.item_list.length === 0 && !gameState.current_item) {
+            const allItems = [...gameState.item_list]; // Copy for items remaining
+            if (gameState.current_item && !allItems.includes(gameState.current_item)) {
+                allItems.unshift(gameState.current_item + " (current)"); // Add current item to top if not already there
+            }
+
+            if (allItems.length === 0) {
                 itemsRemainingList.innerHTML = '<li>No items remaining.</li>';
             } else {
-                gameState.item_list.forEach(item => {
+                allItems.forEach(item => {
                     const li = document.createElement('li');
                     li.textContent = item;
                     itemsRemainingList.appendChild(li);
                 });
+            }
+
+            // Update Player Inventories List
+            const playerInventoriesList = document.getElementById('player-inventories-list');
+            playerInventoriesList.innerHTML = '';
+            let hasItemsBought = false;
+            for (const player in gameState.player_items) {
+                if (gameState.player_items[player].length > 0) {
+                    hasItemsBought = true;
+                    const headerLi = document.createElement('li');
+                    headerLi.className = 'player-inventory-header';
+                    headerLi.textContent = `${player}'s Inventory`;
+                    playerInventoriesList.appendChild(headerLi);
+                    gameState.player_items[player].forEach(item => {
+                        const itemLi = document.createElement('li');
+                        itemLi.className = 'player-inventory-item';
+                        itemLi.textContent = item;
+                        playerInventoriesList.appendChild(itemLi);
+                    });
+                }
+            }
+            if (!hasItemsBought) {
+                playerInventoriesList.innerHTML = '<li>No items purchased yet.</li>';
             }
 
             // Update Auction History
@@ -853,18 +1251,12 @@ HTML_CONTENT = """
 
             // Update Chat Log
             const chatLog = document.getElementById('chat-log');
-            // Clear existing log but only append new messages to avoid duplication on refresh
-            const existingMessagesCount = chatLog.children.length;
-            if (gameState.chat_log.length > existingMessagesCount) {
-                for (let i = existingMessagesCount; i < gameState.chat_log.length; i++) {
-                    const chatEntry = gameState.chat_log[i];
-                    const div = document.createElement('div');
-                    div.className = `chat-message ${chatEntry.sender}`;
-                    div.innerHTML = `<strong>${chatEntry.sender}:</strong> ${chatEntry.message}`;
-                    chatLog.appendChild(div);
-                }
-                chatLog.scrollTop = chatLog.scrollHeight; // Scroll to the latest message
+            // Clear current chat log completely and rebuild to avoid complex diffing logic
+            chatLog.innerHTML = '';
+            for (const chatEntry of gameState.chat_log) {
+                addChatMessage(chatEntry.sender, chatEntry.message, chatEntry.sender);
             }
+            chatLog.scrollTop = chatLog.scrollHeight; // Ensure it scrolls to bottom after full rebuild
         }
     </script>
 </body>
@@ -872,7 +1264,5 @@ HTML_CONTENT = """
 """
 
 if __name__ == '__main__':
-    # For Render deployment, Render will provide the PORT env var.
-    # It's good practice to get it from there.
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=True) # debug=True for local development. Set to False for production.
