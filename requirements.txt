@@ -1,0 +1,2 @@
+Flask # Or any compatible version
+google-generativeai # Ensure this version is compatible with your python environment

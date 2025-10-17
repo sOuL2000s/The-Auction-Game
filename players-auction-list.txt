@@ -1,133 +1,98 @@
-# ⚽ Player Roster: Elite Footballers by Position 🌟
-
----
-
-### 🧤 Goalkeepers (GK)
-
-*   Alisson Becker
-*   David Raya
-*   Ederson Moraes
-*   Emiliano Martínez
-*   Gianluigi Donnarumma
-*   Jan Oblak
-*   Marc-André ter Stegen
-*   Mike Maignan
-*   Thibaut Courtois
-*   Yann Sommer
-
----
-
-### 🛡️ Defenders - Centre-Backs (CB)
-
-*   Alessandro Bastoni
-*   Antonio Rüdiger
-*   Dayot Upamecano
-*   Dean Huijsen
-*   Éder Militão
-*   Gabriel Magalhães
-*   Ibrahima Konaté
-*   John Stones
-*   Josko Gvardiol
-*   Manuel Akanji
-*   Marc Guéhi
-*   Marquinhos
-*   Matthijs de Ligt
-*   Murillo
-*   Pau Cubarsí
-*   Ronald Araujo
-*   Rúben Dias
-*   Virgil van Dijk
-*   William Saliba
-
----
-
-### 🏃‍♂️ Defenders - Left-Backs (LB)
-
-*   Alejandro Balde
-*   Alphonso Davies
-*   Federico Dimarco
-*   Nuno Mendes
-*   Theo Hernández
-
----
-
-### 🏃‍♂️ Defenders - Right-Backs (RB)
-
-*   Achraf Hakimi
-*   Daniel Carvajal
-*   Jeremie Frimpong
-*   Jules Koundé
-*   Jurriën Timber
-*   Trent Alexander-Arnold
-
----
-
-### 🧠 Midfielders
-
-*   Alexis Mac Allister
-*   Arda Guler
-*   Aurélien Tchouaméni
-*   Dani Olmo
-*   Declan Rice
-*   Eduardo Camavinga
-*   Federico Valverde
-*   Fermin Lopez
-*   Frenkie De Jong
-*   Gavi
-*   Joshua Kimmich
-*   Jude Bellingham
-*   Kevin De Bruyne
-*   Luka Modric
-*   Martin Ødegaard
-*   Nicolò Barella
-*   Pedri
-*   Phil Foden
-*   Rodri
-*   Scott McTominay
-*   Vitinha
-
----
-
-### ⚡ Wingers
-
-*   Bradley Barcola
-*   Bukayo Saka
-*   Cody Gakpo
-*   Désiré Doué
-*   Franco Mastantuono
-*   Jeremy Doku
-*   Khvicha Kvaratskhelia
-*   Lamine Yamal
-*   Luis Díaz
-*   Marcus Rashford
-*   Michael Olise
-*   Mohamed Salah
-*   Nico Williams
-*   Ousmane Dembélé
-*   Pedro Neto
-*   Rafael Leão
-*   Raphinha
-*   Rodrygo
-*   Vinícius Júnior
-
----
-
-### 🎯 Strikers
-
-*   Alexander Isak
-*   Benjamin Sesko
-*   Darwin Nunez
-*   Erling Haaland
-*   Ferran Torres
-*   Harry Kane
-*   Hugo Ekitiké
-*   Julián Álvarez
-*   Kai Havertz
-*   Kylian Mbappé
-*   Lautaro Martínez
-*   Marcus Thuram
-*   Nicolas Jackson
-*   Omar Marmoush
-*   Samu Aghehowa
-*   Victor Osimhen
-*   Viktor Gyökeres
+Alisson Becker
+David Raya
+Ederson Moraes
+Emiliano Martínez
+Gianluigi Donnarumma
+Jan Oblak
+Marc-André ter Stegen
+Mike Maignan
+Thibaut Courtois
+Yann Sommer
+Alessandro Bastoni
+Antonio Rüdiger
+Dayot Upamecano
+Dean Huijsen
+Éder Militão
+Gabriel Magalhães
+Ibrahima Konaté
+John Stones
+Josko Gvardiol
+Manuel Akanji
+Marc Guéhi
+Marquinhos
+Matthijs de Ligt
+Murillo
+Pau Cubarsí
+Ronald Araujo
+Rúben Dias
+Virgil van Dijk
+William Saliba
+Alejandro Balde
+Alphonso Davies
+Federico Dimarco
+Nuno Mendes
+Theo Hernández
+Achraf Hakimi
+Daniel Carvajal
+Jeremie Frimpong
+Jules Koundé
+Jurriën Timber
+Trent Alexander-Arnold
+Alexis Mac Allister
+Arda Guler
+Aurélien Tchouaméni
+Dani Olmo
+Declan Rice
+Eduardo Camavinga
+Federico Valverde
+Fermin Lopez
+Frenkie De Jong
+Gavi
+Joshua Kimmich
+Jude Bellingham
+Kevin De Bruyne
+Luka Modric
+Martin Ødegaard
+Nicolò Barella
+Pedri
+Phil Foden
+Rodri
+Scott McTominay
+Vitinha
+Bradley Barcola
+Bukayo Saka
+Cody Gakpo
+Désiré Doué
+Franco Mastantuono
+Jeremy Doku
+Khvicha Kvaratskhelia
+Lamine Yamal
+Luis Díaz
+Marcus Rashford
+Michael Olise
+Mohamed Salah
+Nico Williams
+Ousmane Dembélé
+Pedro Neto
+Rafael Leão
+Raphinha
+Rodrygo
+Vinícius Júnior
+Alexander Isak
+Benjamin Sesko
+Darwin Nunez
+Erling Haaland
+Ferran Torres
+Harry Kane
+Hugo Ekitiké
+Julián Álvarez
+Kai Havertz
+Kylian Mbappé
+Lautaro Martínez
+Marcus Thuram
+Nicolas Jackson
+Omar Marmoush
+Samu Aghehowa
+Victor Osimhen
+Viktor Gyökeres
+robert lewandowski
