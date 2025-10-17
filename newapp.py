@@ -467,16 +467,21 @@ HTML_CONTENT = """
             --error-color: #D32F2F; /* Red Error */
         }
 
-        body {
-            font-family: 'Roboto', sans-serif;
+        /* --- Global Resets & Body Setup --- */
+        html, body {
+            height: 100%; /* Ensure html and body take full viewport height */
             margin: 0;
             padding: 0;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
             background-color: var(--background-light);
             color: var(--text-color);
             display: flex;
-            flex-direction: column;
+            flex-direction: column; /* Main content stacked vertically */
             align-items: center;
-            min-height: 100vh;
+            min-height: 100vh; /* Ensures body takes full viewport height */
             line-height: 1.6;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
@@ -497,6 +502,7 @@ HTML_CONTENT = """
             margin-bottom: 25px;
             padding-bottom: 10px;
             border-bottom: 2px solid var(--primary-color);
+            flex-shrink: 0; /* Prevents H1 from shrinking */
         }
 
         h2 {
@@ -513,33 +519,46 @@ HTML_CONTENT = """
             margin-bottom: 10px;
         }
 
+        /* --- Main Container (Grid) --- */
         .container {
             display: grid;
             grid-template-columns: 1fr 1fr 2fr; /* Left, Middle, Right panels */
+            /* KEY FIX: Use minmax(0, 1fr) for grid rows. This makes the row
+               take available height, but allows its children (panels) to
+               flex and scroll without being cut off. */
+            grid-template-rows: minmax(0, 1fr); 
             gap: 20px;
             width: 95%;
             max-width: 1400px;
             background-color: #fff;
             box-shadow: var(--shadow-medium);
             border-radius: 12px;
-            overflow: hidden; /* Important for fixed chat input not breaking layout */
-            margin-bottom: 25px;
-            min-height: 750px;
+            overflow: hidden; /* Good for preventing internal elements from breaking out */
+            margin-bottom: 25px; /* Space above footer */
             padding: 20px;
+            flex: 1; /* Allows container to grow and fill remaining vertical space in body */
+            box-sizing: border-box; 
+            min-height: 0; /* CRITICAL for flex item to shrink and allow overflow */
         }
 
+        /* --- Panels within the Grid (Left, Center, Right) --- */
         .left-panel, .center-panel, .right-panel {
             padding: 20px;
             background-color: var(--background-medium);
             border-radius: 10px;
             display: flex;
-            flex-direction: column;
+            flex-direction: column; /* Stack content vertically within panels */
             border: 1px solid var(--border-color);
-        }
-        .right-panel {
-            position: relative; /* For sticky chat input */
+            /* KEY FIX: Panels *must* take 100% height of their grid cell */
+            height: 100%; 
+            box-sizing: border-box;
+            /* KEY FIX: Allow panel itself to scroll if its content exceeds its height */
+            overflow-y: auto; 
+            overflow-x: hidden; /* Prevent horizontal scroll on panels */
+            min-height: 0; /* CRITICAL for flex item panels to shrink if needed */
         }
 
+        /* --- Individual Sections within Panels (.panel-section) --- */
         .panel-section {
             background-color: #fff;
             padding: 15px;
@@ -547,17 +566,24 @@ HTML_CONTENT = """
             margin-bottom: 20px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
             border: 1px solid var(--border-color);
-            flex-shrink: 0; /* Prevent sections from shrinking excessively */
+            flex-shrink: 0; /* Prevents panel sections themselves from shrinking */
+            /* KEY FIX: Make panel-section a flex container for its content */
+            display: flex; 
+            flex-direction: column; 
+            min-height: 0; /* Allow panel-section to shrink if its content can scroll */
+            overflow: hidden; /* Hide any content that tries to burst out of section */
         }
         .panel-section:last-child {
             margin-bottom: 0;
         }
 
-        /* Specific section styles */
+        /* Specific section styles (these are flex-shrink: 0 children of .panel-section) */
         .game-status-section {
             margin-bottom: 20px;
         }
-
+        .current-auction-section {
+            margin-bottom: 20px;
+        }
         .status-message {
             background-color: var(--primary-color);
             color: white;
@@ -572,10 +598,6 @@ HTML_CONTENT = """
         .status-message.info { background-color: var(--info-color); }
         .status-message.warning { background-color: var(--warning-color); }
         .status-message.error { background-color: var(--error-color); }
-
-        .current-auction-section {
-            margin-bottom: 20px;
-        }
         .current-auction-section p {
             margin: 8px 0;
             display: flex;
@@ -591,11 +613,13 @@ HTML_CONTENT = """
             color: var(--primary-color);
         }
 
+        /* --- Left Panel Specifics (Item Upload and Reset Button) --- */
         .item-upload-section {
-            margin-top: auto; /* Push to bottom in left panel */
             padding-top: 20px;
             border-top: 1px solid var(--border-color);
             text-align: center;
+            flex-shrink: 0; /* Ensures it doesn't shrink */
+            margin-bottom: 20px; /* Normal spacing */
         }
         .item-upload-section input[type="file"] {
             display: block;
@@ -613,23 +637,35 @@ HTML_CONTENT = """
             margin-top: 5px;
         }
 
+        /* This pushes the reset button to the bottom if the left panel is taller than its minimal content */
+        .left-panel > .panel-section:last-child { 
+            margin-top: auto; 
+        }
+
+        /* --- Scrollable List Wrappers (Content within .panel-section) --- */
         .scrollable-list-wrapper {
-            flex: 1; /* Allow these sections to grow and take space if in flex parent */
+            flex: 1; /* KEY FIX: This flex:1 now applies correctly within the flex .panel-section */
             overflow-y: auto;
             border: 1px solid var(--border-color);
             border-radius: 8px;
             background-color: #fdfdfd;
             padding: 10px;
             box-shadow: inset 0 1px 3px rgba(0,0,0,0.03);
-            min-height: 100px; /* Ensure a minimum visible height */
-            max-height: 250px; /* Cap height to prevent stretching */
-            margin-bottom: 10px; /* Space from other sections */
+            /* KEY FIX: Removed fixed heights. Rely on flex:1 and min-height:0 for flexibility. */
+            min-height: 0; /* CRITICAL: Allows the scrollable area to shrink to enable overflow */
+            margin-bottom: 10px; /* Still applies below the wrapper if there are more elements */
+            min-width: 0; 
+            word-wrap: break-word; 
         }
-        /* Override specific scrollable lists if needed for initial appearance */
-        #participants-list-wrapper, #player-inventories-list-wrapper, #items-remaining-list-wrapper, #auction-history-list-wrapper {
-            flex-grow: 1; /* Allow these to fill space within their parent */
-            max-height: 200px; /* Further adjust max-height for balanced layout */
+        /* Specific scrollable lists will now just inherit flex:1 and min-height:0 */
+        #participants-list-wrapper, 
+        #player-inventories-list-wrapper, 
+        #items-remaining-list-wrapper, 
+        #auction-history-list-wrapper {
+            flex-grow: 1; /* This is largely redundant with flex:1 but doesn't hurt */
+            /* REMOVED: max-height values, as they were causing cut-offs when combined with flex:1 */
         }
+
         .scrollable-list-wrapper ul {
             list-style-type: none;
             padding: 0;
@@ -668,7 +704,6 @@ HTML_CONTENT = """
             justify-content: flex-start;
         }
 
-
         .player-budget {
             font-weight: 600;
             color: var(--primary-color);
@@ -679,26 +714,30 @@ HTML_CONTENT = """
             margin-left: 10px;
         }
 
+        /* --- Right Panel (Chat Interface) --- */
         .chat-log {
-            flex: 1; /* Allow chat log to take up available space */
-            overflow-y: auto;
+            flex: 1; /* Allows chat log to take up available space in right-panel */
+            overflow-y: auto; /* Provides vertical scrollbar */
+            overflow-x: hidden; /* Explicitly hide horizontal scroll if any */
             border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 15px;
             background-color: #fff;
-            margin-bottom: 20px; /* Space above input */
+            margin-bottom: 20px; 
             display: flex;
-            flex-direction: column;
+            flex-direction: column; 
             box-shadow: inset 0 1px 3px rgba(0,0,0,0.03);
-            min-height: 400px;
+            /* KEY FIX: Re-introduced a reasonable min-height for default view, but ensures it can flex. */
+            min-height: 350px; /* Provides a base height */
             scroll-behavior: smooth;
+            word-wrap: break-word; 
         }
         .chat-message {
             margin-bottom: 12px;
             padding: 8px 12px;
             border-radius: 8px;
             max-width: 90%;
-            word-wrap: break-word;
+            word-wrap: break-word; /* Good for preventing horizontal overflow */
             font-size: 0.95em;
         }
         .chat-message:last-child {
@@ -744,8 +783,8 @@ HTML_CONTENT = """
         .chat-input {
             display: flex;
             padding-top: 15px;
-            flex-shrink: 0; /* Prevent input from shrinking */
-            margin-top: auto; /* Push to bottom */
+            flex-shrink: 0; 
+            margin-top: auto; /* Pushes to bottom of its flex container (right-panel) */
             border-top: 1px solid var(--border-color);
             background-color: var(--background-medium); /* Match panel background */
             padding-bottom: 5px; /* Add some padding at the bottom */
@@ -795,7 +834,7 @@ HTML_CONTENT = """
         }
         .reset-game-button {
             background-color: var(--error-color); /* Red for reset */
-            margin-top: 20px;
+            margin-top: 20px; /* Keep some top margin for spacing */
             width: 100%;
         }
         .reset-game-button:hover {
@@ -824,9 +863,11 @@ HTML_CONTENT = """
             border-top: 1px solid var(--border-color);
             width: 90%;
             max-width: 1400px;
+            flex-shrink: 0; 
+            margin-top: auto; /* Pushes footer to bottom of body if content is short */
         }
 
-        /* Responsive adjustments */
+        /* --- Responsive adjustments --- */
         @media (max-width: 1200px) {
             .container {
                 grid-template-columns: 1.5fr 2fr; /* Two columns: Left+Middle, Right */
@@ -834,19 +875,20 @@ HTML_CONTENT = """
                     "info chat"
                     "lists chat";
                 max-width: 1000px;
+                grid-template-rows: minmax(0, 1fr); /* Keep minmax for 2-column layout */
             }
             .left-panel {
                 grid-area: info;
             }
             .center-panel {
                 grid-area: lists;
-                flex-direction: column; /* Stack sections in center panel */
             }
             .right-panel {
                 grid-area: chat;
             }
-            #participants-list-wrapper, #player-inventories-list-wrapper, #items-remaining-list-wrapper, #auction-history-list-wrapper {
-                max-height: 180px; /* Adjust max-height for smaller vertical space */
+            /* Min-height for chat log in this view */
+            .chat-log {
+                min-height: 300px; 
             }
         }
 
@@ -859,16 +901,21 @@ HTML_CONTENT = """
                     "chat";
                 padding: 15px;
                 gap: 15px;
+                min-height: unset; /* Allow container to grow with content in single column */
+                grid-template-rows: auto; /* Single column, let rows size to content */
             }
             h1 {
                 font-size: 2em;
             }
+            /* IMPORTANT: When in a single column, these panels should grow with their content,
+               so `height: 100%` and `overflow-y: auto` would conflict. */
             .left-panel, .center-panel, .right-panel {
                 padding: 15px;
+                height: auto; /* Allow panels to grow with content */
+                overflow-y: visible; /* Let the global scrollbar handle this, not individual panels */
             }
             .chat-log {
-                min-height: 300px;
-                margin-bottom: 15px;
+                min-height: 250px; /* Provide a visual minimum height for chat log in stacked layout */
             }
             .chat-input {
                 padding-top: 10px;
@@ -878,71 +925,18 @@ HTML_CONTENT = """
                 padding: 12px 15px;
                 font-size: 0.95em;
             }
-            #participants-list-wrapper, #player-inventories-list-wrapper, #items-remaining-list-wrapper, #auction-history-list-wrapper {
-                max-height: 150px; /* Further adjust max-height */
-            }
         }
 
         @media (max-width: 600px) {
-            h1 {
-                font-size: 1.8em;
-                margin-bottom: 15px;
-            }
-            h2 {
-                font-size: 1.5em;
-            }
-            h3 {
-                font-size: 1.1em;
-            }
             .container {
-                width: 100%;
-                border-radius: 0;
-                box-shadow: none;
-                padding: 10px;
-                min-height: unset;
+                grid-template-rows: auto; 
             }
             .left-panel, .center-panel, .right-panel {
-                border-radius: 0;
-                border: none;
-                padding: 10px;
-            }
-            .panel-section {
-                padding: 10px;
-                border-radius: 0;
-                box-shadow: none;
-                border: none;
-                border-bottom: 1px solid var(--border-color);
-            }
-            .panel-section:last-child {
-                 border-bottom: none;
+                height: auto; 
+                overflow-y: visible; 
             }
             .chat-log {
-                padding: 10px;
-            }
-            .chat-message {
-                padding: 6px 10px;
-                margin-bottom: 8px;
-            }
-            .chat-input {
-                flex-direction: column;
-                padding-top: 10px;
-            }
-            .chat-input input[type="text"] {
-                margin-right: 0;
-                margin-bottom: 10px;
-            }
-            button {
-                width: 100%;
-            }
-            .item-upload-section input[type="file"] {
-                width: 100%;
-                max-width: none;
-            }
-            footer {
-                width: 100%;
-                border-radius: 0;
-                padding: 15px;
-                margin-top: 15px;
+                min-height: 200px; 
             }
         }
     </style>
