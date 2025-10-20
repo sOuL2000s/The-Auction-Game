@@ -1,55 +1,55 @@
-rodri
-mbappe
-haaland
-bellingham
-vinicius
-raphinha
-salah
-kane
-son
-yamal
-pedri
-saka
-saliba
-kimmich
-donnarumma
-van dijk
-courtois
-musiala
-Olise
-Kvaratskhelia
-Isak
-Valverde
-Dias
-dembele
-Rice
-rudiger
-odegaard
-Marquinhos
-Oblak
-lewandowski
-Messi
-Benzema
-ronaldo
-mamardashvilli
-Nico Williams
-kobel
-palmer
-Wirtz
-Vitinha
-Araujo
-camavinga
-alvarez
-luis diaz
-tchouameni
-rodrygo
-mac allister
-militao
-arnold
-magalhaes
-kounde
-de jong
-guirassy
+rodri (dmf)
+mbappe (cf)
+haaland (cf)
+bellingham (amf)
+vinicius (lwf)
+raphinha (lwf)
+salah (rwf)
+kane (cf)
+son (lwf)
+yamal (rwf)
+pedri (cmf)
+saka (rwf)
+saliba (cb)
+kimmich (dmf)
+donnarumma (gk)
+van dijk (cb)
+courtois (gk)
+musiala (amf)
+Olise (rwf)
+Kvaratskhelia (lwf)
+Isak (cf)
+Valverde (cmf)
+Dias (cb)
+dembele (cf)
+Rice (cmf)
+rudiger (cb)
+odegaard (amf)
+Marquinhos (cb)
+Oblak (gk)
+lewandowski (cf)
+Messi (rwf)
+Benzema (cf)
+ronaldo (cf)
+mamardashvilli (gk)
+Nico Williams (lwf)
+kobel (gk)
+palmer (amf)
+Wirtz (amf)
+Vitinha (cmf)
+Araujo (cb)
+camavinga (cmf)
+alvarez (cf)
+luis diaz (lwf)
+tchouameni (dmf)
+rodrygo (rwf)
+mac allister (cmf)
+militao (cb)
+arnold (rb)
+magalhaes (cb)
+kounde (rb)
+de jong (cmf)
+guirassy 
 raya
 alisson
 ter stegen 
