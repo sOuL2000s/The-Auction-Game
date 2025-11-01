@@ -1,0 +1,26 @@
+{
+    "participants": {},
+    "player_items": {},
+    "item_list": [],
+    "auction_history": [],
+    "current_item": null,
+    "current_bid": 0,
+    "high_bidder": null,
+    "status": "waiting_for_init",
+    "chat_log": [
+        {
+            "sender": "Auctioneer",
+            "message": "Welcome! To begin, type: `start game players John, Jane budget 100` (Or add your own player names and budget!)."
+        },
+        {
+            "sender": "System",
+            "message": "Game has been reset. Start a new auction!"
+        }
+    ],
+    "last_processed_action_hash": null,
+    "player_inventory_sort": {
+        "key": "name",
+        "order": "asc"
+    },
+    "initial_budget": 0
+}

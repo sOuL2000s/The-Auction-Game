@@ -1,39 +1,44 @@
 import os
 import json
 import random
-import re # Import for regular expressions
+import re
 import csv
 import io
-import copy # Import for deep copying game state
+import copy
+import sys # For getting object size, helpful for debugging memory (not used in final, but useful for diagnostics)
 
 from flask import Flask, request, jsonify, render_template_string
 
 # --- Configuration ---
 app = Flask(__name__)
 
-# --- Game State ---
-# Define a function to get the initial game state, allowing for easy reset
+# --- Game State (Server now primarily provides structure, not persistent state) ---
 def get_initial_game_state():
     return {
-        "participants": {},  # {player_name: budget}
-        "player_items": {},  # {player_name: [{"name": item_name, "price": price}]}
-        "item_list": [],     # List of items to be auctioned
-        "auction_history": [], # List of past events/bids (e.g., "ItemX sold to PlayerY for Z credits")
+        "participants": {},
+        "player_items": {},
+        "item_list": [],
+        "auction_history": [],
         "current_item": None,
         "current_bid": 0,
         "high_bidder": None,
-        "status": "waiting_for_init", # waiting_for_init, waiting_for_items, waiting_for_auction_start, bidding, game_over, item_sold (interim status for auto-start)
-        "chat_log": [{"sender": "Auctioneer", "message": "Welcome! To begin, type: `start game players John, Jane budget 100` (Or add your own player names and budget!)."}],      # For displaying chat messages in the UI
-        "last_processed_action_hash": None, # To prevent reprocessing same action from simple parsing
-        "player_inventory_sort": {"key": "name", "order": "asc"} # Default sort for inventories
+        "status": "waiting_for_init",
+        "chat_log": [{"sender": "Auctioneer", "message": "Welcome! To begin, type: `start game players John, Jane budget 100` (Or add your own player names and budget!)."}],
+        "last_processed_action_hash": None, # Stored per-client, but needed for server-side logic
+        "player_inventory_sort": {"key": "name", "order": "asc"},
+        "initial_budget": 0
     }
 
-game_state = get_initial_game_state()
-game_state_history = [] # Stack to store previous game states for undo
-MAX_HISTORY_SIZE = 20 # Limit history size to prevent excessive memory usage
+# The server no longer manages a global persistent game_state.
+# Instead, it operates on the state provided by the client for each request.
+# The `game_state_history` will also be client-side now for undo/redo.
+# We'll keep a reference to a default initial state for 'reset' and initial load.
+DEFAULT_INITIAL_GAME_STATE = get_initial_game_state()
 
 # --- Rule-Based Command Processing ---
 
+# This function remains largely the same, but it now explicitly takes `current_game_state_for_logic`
+# as an argument, rather than relying on a global server-side `game_state`.
 def process_user_command(user_input, current_game_state_for_logic):
     """
     Parses user input using rule-based logic to determine game actions and narratives.
@@ -62,7 +67,7 @@ def process_user_command(user_input, current_game_state_for_logic):
 
     # 2. Add Items (Simplified)
     match = re.match(r"add (.*)", user_input_lower)
-    if match and current_game_state_for_logic["status"] != "waiting_for_init": # Allow adding items at various stages
+    if match and current_game_state_for_logic["status"] != "waiting_for_init":
         items_str = match.group(1)
         items = [item.strip() for item in items_str.split(',') if item.strip()]
         if items:
@@ -83,7 +88,7 @@ def process_user_command(user_input, current_game_state_for_logic):
             narrative = "Auctioneer: No items available to shuffle yet. Please `add Car, House` first."
             return narrative, {"type": "no_action"}
 
-    # 4. Explicit "No Sale" command (already simple)
+    # 4. Explicit "No Sale" command
     if user_input_lower == "no sale":
         if current_game_state_for_logic["current_item"]:
             narrative = f"As there are no valid bids on the '{current_game_state_for_logic['current_item']}', it remains unsold for now. Perhaps it will return later, or we move on."
@@ -94,7 +99,6 @@ def process_user_command(user_input, current_game_state_for_logic):
             return narrative, {"type": "no_action"}
 
     # 5. Sell Item (Explicit - Simplified: `sell John 30`) - MUST COME BEFORE IMPLICIT SELL
-    # Note: User requested "john 30 sell". I've made it "sell John 30" for consistency with "bid" being an action keyword.
     match = re.match(r"sell ([\w\s]+) (\d+)\.?$", user_input_lower)
     if match and current_game_state_for_logic["current_item"]:
         player_name = match.group(1).strip().title()
@@ -150,10 +154,8 @@ def process_user_command(user_input, current_game_state_for_logic):
             return narrative, {"type": "no_action"}
         
         # Check if the requested item is actually in the list (if specified by name)
-        # Note: If item_to_start_name was from "first/next", it *is* in item_list by definition.
         if item_to_start_name in current_game_state_for_logic["item_list"] or \
-           (item_to_start_name.endswith(" (current)") and item_to_start_name.replace(" (current)","") in current_game_state_for_logic["item_list"]): # Check for current item in UI representation
-            # If the item name includes "(current)" from a UI button, strip it for internal logic
+           (item_to_start_name.endswith(" (current)") and item_to_start_name.replace(" (current)","") in current_game_state_for_logic["item_list"]):
             if item_to_start_name.endswith(" (current)"):
                 item_to_start_name = item_to_start_name.replace(" (current)","")
 
@@ -170,12 +172,10 @@ def process_user_command(user_input, current_game_state_for_logic):
         narrative = f"An auction for '{current_game_state_for_logic['current_item']}' is already in progress. Please bid or sell it first using: `John bid 10` or `sell it!`."
         return narrative, {"type": "no_action"}
 
-
     # 8. Place Bid (Simplified: `John bid 10`)
-    # Changed from 'John 10' to 'John bid 10' to avoid ambiguity with player names and amounts in other commands.
     match = re.match(r"([\w\s]+) bid (\d+)\.?$", user_input_lower)
     if match and current_game_state_for_logic["status"] == "bidding":
-        player_name = match.group(1).strip().title() # Capitalize for consistency
+        player_name = match.group(1).strip().title()
         amount = int(match.group(2))
 
         if player_name not in current_game_state_for_logic["participants"]:
@@ -203,186 +203,180 @@ def process_user_command(user_input, current_game_state_for_logic):
             narrative = f"Player '{player_name}' not recognized. Recognized players: {', '.join(current_game_state_for_logic['participants'].keys())}."
             return narrative, {"type": "no_action"}
         narrative = f"{player_name} passes on '{current_game_state_for_logic['current_item']}'. Any other bids?"
-        game_action = {"type": "pass", "player": player_name} # This action might not trigger a state change directly, but records the pass.
+        game_action = {"type": "pass", "player": player_name}
         return narrative, game_action
     elif match and not current_game_state_for_logic["current_item"]:
         narrative = "No item is currently under auction to pass on."
         return narrative, {"type": "no_action"}
         
-    # If no specific command is matched
     return f"Auctioneer: I didn't understand your command: '{user_input}'. Please try again with a clear instruction, or refer to the 'Command Assistant' for examples. Common commands include: `John bid 10`, `sell it!`, `auction Car`, `no sale`.", {"type": "no_action"}
 
 
 # --- Game Logic Functions ---
 
-def apply_game_action(action):
+# `apply_game_action` now takes `current_game_state` as an argument
+def apply_game_action(action, current_game_state):
     """
-    Applies a parsed GAME_ACTION to the global game_state.
-    Pushes current state to history BEFORE modification.
+    Applies a parsed GAME_ACTION to a given game_state.
+    Returns a tuple: (modified_game_state, result_message_string, bool_state_actually_changed).
     """
-    global game_state
-    global game_state_history
-
+    # Create a deep copy to work on, ensuring no side effects on the original until explicitly returned
+    modified_game_state = copy.deepcopy(current_game_state)
+    
     action_type = action.get("type")
+    state_actually_changed = False
+    result_message = ""
 
-    # For actions that modify the game state, push a deep copy to history
-    # 'no_action' and 'pass' (which currently has no actual state change in apply_game_action)
-    # are generally safe to skip for history, but including them for robustness is also okay.
-    # For now, let's include all non-trivial actions.
-    if action_type != "no_action":
-        # Ensure we don't store the current state if it's identical to the last one in history
-        # (e.g., if a user keeps clicking "start next auction" for an already active auction)
-        if not game_state_history or \
-           json.dumps(game_state, sort_keys=True) != json.dumps(game_state_history[-1], sort_keys=True):
-            game_state_history.append(copy.deepcopy(game_state))
-            if len(game_state_history) > MAX_HISTORY_SIZE:
-                game_state_history.pop(0) # Remove oldest state if history size exceeds limit
-        
-        # Reset last_processed_action_hash for new actions
-        game_state["last_processed_action_hash"] = None
-
-    # Handle duplicate action hash for actual state-changing commands
+    # Deduplicate actions: compute hash before any state changes
     action_hash = hash(json.dumps(action, sort_keys=True))
-    if action_hash == game_state["last_processed_action_hash"] and action_type not in ["pass", "no_action"]:
+    
+    if action_type not in ["pass", "no_action"] and action_hash == modified_game_state.get("last_processed_action_hash"):
         print(f"Skipping duplicate action: {action_type}")
-        return "Duplicate action skipped."
-    game_state["last_processed_action_hash"] = action_hash
+        return modified_game_state, "Duplicate action skipped.", False
 
+    # Set hash for the action being processed
+    if action_type != "no_action":
+        modified_game_state["last_processed_action_hash"] = action_hash
+        state_actually_changed = True # Assume state will change for non-no_action types
 
+    # Now apply the action to modified_game_state
     if action_type == "init_game":
         players = action.get("players")
         budget = action.get("budget")
         if not players or budget is None:
-            return "Error: Missing players or budget for init_game."
+            return current_game_state, "Error: Missing players or budget for init_game.", False # Return original state
         
-        game_state["participants"] = {p.title(): budget for p in players} # Ensure consistent capitalization
-        game_state["player_items"] = {p.title(): [] for p in players}
-        game_state["initial_budget"] = budget # Store initial budget for display
-        game_state["status"] = "waiting_for_items"
-        game_state["chat_log"].append({"sender": "System", "message": f"Game initialized with players: {', '.join(game_state['participants'].keys())}. Each has {budget} credits."})
-        return f"Game initialized for {len(players)} players."
+        modified_game_state["participants"] = {p.title(): budget for p in players}
+        modified_game_state["player_items"] = {p.title(): [] for p in players}
+        modified_game_state["initial_budget"] = budget
+        modified_game_state["status"] = "waiting_for_items"
+        modified_game_state["chat_log"] = DEFAULT_INITIAL_GAME_STATE["chat_log"].copy() # Reset chat on new game
+        modified_game_state["chat_log"].append({"sender": "System", "message": f"Game initialized with players: {', '.join(modified_game_state['participants'].keys())}. Each has {budget} credits."})
+        result_message = f"Game initialized for {len(players)} players."
 
     elif action_type == "add_items":
         items = action.get("items")
         if not items:
-            return "Error: No items provided for add_items."
+            return current_game_state, "Error: No items provided for add_items.", False
         
-        items_to_add = [item.strip().title() for item in items if item.strip()] # Capitalize items
-        game_state["item_list"].extend(items_to_add)
-        # Update status based on current game flow
-        if game_state["status"] == "waiting_for_items":
-            game_state["status"] = "waiting_for_auction_start"
-            game_state["chat_log"].append({"sender": "Auctioneer", "message": f"Excellent, items have been added! You can now use the 'Auction Next Item' button or type 'auction first'."})
-        game_state["chat_log"].append({"sender": "System", "message": f"Items added: {', '.join(items_to_add)}."})
-        return f"Added {len(items_to_add)} items."
+        items_to_add = [item.strip().title() for item in items if item.strip()]
+        modified_game_state["item_list"].extend(items_to_add)
+        if modified_game_state["status"] == "waiting_for_items":
+            modified_game_state["status"] = "waiting_for_auction_start"
+            modified_game_state["chat_log"].append({"sender": "Auctioneer", "message": f"Excellent, items have been added! You can now use the 'Auction Next Item' button or type 'auction first'."})
+        modified_game_state["chat_log"].append({"sender": "System", "message": f"Items added: {', '.join(items_to_add)}."})
+        result_message = f"Added {len(items_to_add)} items."
 
     elif action_type == "start_item_auction":
         item_name = action.get("item")
         if not item_name:
-            return "Error: Missing item name for start_item_auction."
+            return current_game_state, "Error: Missing item name for start_item_auction.", False
         
-        # Ensure we're not starting an auction for the same item twice if it's already active
-        if game_state["current_item"] == item_name and game_state["status"] == "bidding":
-            return f"Auction for '{item_name}' is already underway."
+        if item_name == modified_game_state["current_item"] and modified_game_state["status"] == "bidding":
+            return current_game_state, f"Auction for '{item_name}' is already underway.", False
         
-        # Ensure the item is actually in the list before starting an auction for it
-        if item_name not in game_state["item_list"]:
-            return f"Error: Item '{item_name}' not found in available items or already auctioned. Available: {', '.join(game_state['item_list'])}"
+        if item_name not in modified_game_state["item_list"]:
+            return current_game_state, f"Error: Item '{item_name}' not found in available items or already auctioned.", False
 
-        game_state["current_item"] = item_name
-        game_state["current_bid"] = 0 
-        game_state["high_bidder"] = None
-        game_state["status"] = "bidding"
-        game_state["chat_log"].append({"sender": "System", "message": f"Auction for '{item_name}' has started! Current bid: {game_state['current_bid']}"})
-        return f"Auction started for '{item_name}'."
+        modified_game_state["current_item"] = item_name
+        modified_game_state["current_bid"] = 0 
+        modified_game_state["high_bidder"] = None
+        modified_game_state["status"] = "bidding"
+        modified_game_state["chat_log"].append({"sender": "System", "message": f"Auction for '{item_name}' has started! Current bid: {modified_game_state['current_bid']}"})
+        result_message = f"Auction started for '{item_name}'."
 
     elif action_type == "bid":
-        player = action.get("player").title() # Ensure consistent capitalization
+        player = action.get("player").title()
         amount = action.get("amount")
 
         if not player or amount is None:
-            return "Error: Missing player or amount for bid."
-        if player not in game_state["participants"]:
-            return f"Error: Player '{player}' not recognized."
-        if game_state["current_item"] is None:
-             return "Error: No item is currently being auctioned to bid on."
-        if amount <= game_state["current_bid"]:
-            return f"Error: Bid of {amount} is not higher than current bid of {game_state['current_bid']}. Minimum bid is {game_state['current_bid'] + 1}."
-        if amount > game_state["participants"][player]:
-            return f"Error: Player '{player}' does not have enough budget ({game_state['participants'][player]}) for a bid of {amount}."
+            return current_game_state, "Error: Missing player or amount for bid.", False
+        if player not in modified_game_state["participants"]:
+            return current_game_state, f"Error: Player '{player}' not recognized.", False
+        if modified_game_state["current_item"] is None:
+             return current_game_state, "Error: No item is currently being auctioned to bid on.", False
+        if amount <= modified_game_state["current_bid"]:
+            return current_game_state, f"Error: Bid of {amount} is not higher than current bid of {modified_game_state['current_bid']}. Minimum bid is {modified_game_state['current_bid'] + 1}.", False
+        if amount > modified_game_state["participants"][player]:
+            return current_game_state, f"Error: Player '{player}' does not have enough budget ({modified_game_state['participants'][player]}) for a bid of {amount}.", False
         
-        game_state["current_bid"] = amount
-        game_state["high_bidder"] = player
-        game_state["chat_log"].append({"sender": "System", "message": f"{player} bids {amount} credits for '{game_state['current_item']}'."})
-        return f"Bid updated: {player} at {amount}."
+        modified_game_state["current_bid"] = amount
+        modified_game_state["high_bidder"] = player
+        modified_game_state["chat_log"].append({"sender": "System", "message": f"{player} bids {amount} credits for '{modified_game_state['current_item']}'."})
+        result_message = f"Bid updated: {player} at {amount}."
 
     elif action_type == "sell_item":
         item_to_sell = action.get("item")
-        actual_player = action.get("player") # This will be None if unsold
+        actual_player = action.get("player")
         actual_amount = action.get("amount")
 
         if item_to_sell is None:
-             return "Error: No item is currently under auction to be sold or declared unsold."
+             return current_game_state, "Error: No item is currently under auction to be sold or declared unsold.", False
 
-        # Remove item from the general list
-        if item_to_sell in game_state["item_list"]:
-            game_state["item_list"].remove(item_to_sell)
+        if item_to_sell in modified_game_state["item_list"]:
+            modified_game_state["item_list"].remove(item_to_sell)
         
-        if actual_player and actual_player in game_state["participants"] and actual_amount > 0:
-            # Valid sale
-            if game_state["participants"][actual_player] < actual_amount:
-                # Should be caught by bid validation but a final check - if it gets here, it's an edge case.
-                sale_message = f"Error: Player '{actual_player}' cannot afford {actual_amount} credits for '{item_to_sell}'. Item declared UNSOLD due to affordability."
-                game_state["chat_log"].append({"sender": "System", "message": sale_message})
-                game_state["auction_history"].append(f"'{item_to_sell}' was declared UNSOLD (affordability issue).")
+        sale_successful = False
+        if actual_player and actual_player in modified_game_state["participants"] and actual_amount > 0:
+            if modified_game_state["participants"][actual_player] < actual_amount:
+                modified_game_state["chat_log"].append({"sender": "System", "message": f"Error: Player '{actual_player}' cannot afford {actual_amount} credits for '{item_to_sell}'. Item declared UNSOLD due to affordability."})
+                modified_game_state["auction_history"].append(f"'{item_to_sell}' was declared UNSOLD (affordability issue).")
             else:
-                game_state["participants"][actual_player] -= actual_amount
-                # Store item with price
-                game_state["player_items"][actual_player].append({"name": item_to_sell, "price": actual_amount})
-                game_state["auction_history"].append(f"'{item_to_sell}' sold to {actual_player} for {actual_amount} credits.")
-                sale_message = f"'{item_to_sell}' sold to {actual_player} for {actual_amount} credits. {actual_player}'s new budget: {game_state['participants'][actual_player]}."
-                game_state["chat_log"].append({"sender": "System", "message": sale_message})
-        else:
-            # Item is declared unsold (no bids, or player cannot afford, or explicit "no sale")
-            game_state["auction_history"].append(f"'{item_to_sell}' was declared UNSOLD (no valid bids).")
-            game_state["chat_log"].append({"sender": "System", "message": f"'{item_to_sell}' declared UNSOLD. No valid bids were received."})
+                modified_game_state["participants"][actual_player] -= actual_amount
+                # Ensure player_items key exists for the player
+                if actual_player not in modified_game_state["player_items"]:
+                    modified_game_state["player_items"][actual_player] = []
+                modified_game_state["player_items"][actual_player].append({"name": item_to_sell, "price": actual_amount})
+                modified_game_state["auction_history"].append(f"'{item_to_sell}' sold to {actual_player} for {actual_amount} credits.")
+                modified_game_state["chat_log"].append({"sender": "System", "message": f"'{item_to_sell}' sold to {actual_player} for {actual_amount} credits. {actual_player}'s new budget: {modified_game_state['participants'][actual_player]}."})
+                sale_successful = True
         
-        # Reset current auction state
-        game_state["current_item"] = None
-        game_state["current_bid"] = 0
-        game_state["high_bidder"] = None
+        if not sale_successful:
+            modified_game_state["auction_history"].append(f"'{item_to_sell}' was declared UNSOLD (no valid bids).")
+            modified_game_state["chat_log"].append({"sender": "System", "message": f"'{item_to_sell}' declared UNSOLD. No valid bids were received."})
         
-        if not game_state["item_list"]:
-            game_state["status"] = "game_over"
-            game_state["chat_log"].append({"sender": "System", "message": "All items sold or declared unsold! Game Over. Reset the game to play again."})
-            return "Game Over: All items processed."
+        modified_game_state["current_item"] = None
+        modified_game_state["current_bid"] = 0
+        modified_game_state["high_bidder"] = None
+        
+        if not modified_game_state["item_list"]:
+            modified_game_state["status"] = "game_over"
+            modified_game_state["chat_log"].append({"sender": "System", "message": "All items sold or declared unsold! Game Over. Reset the game to play again."})
+            result_message = "Game Over: All items processed."
         else:
-            # AUTOMATICALLY START NEXT AUCTION
-            game_state["status"] = "item_sold" # Interim status to ensure auto-start logic is clean
-            next_item = game_state["item_list"][0]
-            # The 'narrative' will be added by the subsequent apply_game_action for 'start_item_auction'
-            # We don't need a system message here, as the next action will generate its own system message.
-            return apply_game_action({"type": "start_item_auction", "item": next_item})
+            next_item = modified_game_state["item_list"][0]
+            modified_game_state["current_item"] = next_item
+            modified_game_state["current_bid"] = 0 
+            modified_game_state["high_bidder"] = None
+            modified_game_state["status"] = "bidding"
+            modified_game_state["chat_log"].append({"sender": "System", "message": f"Auction for '{next_item}' has started! Current bid: {modified_game_state['current_bid']}"})
+            result_message = f"Sale processed. Auction for '{next_item}' has now started."
 
     elif action_type == "pass":
         player = action.get("player")
-        # No direct state change here, just acknowledge the pass.
-        game_state["chat_log"].append({"sender": "System", "message": f"{player} passes on '{game_state['current_item']}'."})
-        return f"{player} passed."
+        modified_game_state["chat_log"].append({"sender": "System", "message": f"{player} passes on '{modified_game_state['current_item']}'."})
+        result_message = f"{player} passed."
+        state_actually_changed = False # A "pass" doesn't change core game state, only logs it
 
     elif action_type == "shuffle_items":
-        if game_state["item_list"]:
-            random.shuffle(game_state["item_list"])
-            game_state["chat_log"].append({"sender": "System", "message": "The remaining items have been shuffled!"})
-            return "Items shuffled."
+        if modified_game_state["item_list"]:
+            random.shuffle(modified_game_state["item_list"])
+            modified_game_state["chat_log"].append({"sender": "System", "message": "The remaining items have been shuffled!"})
+            result_message = "Items shuffled."
         else:
-            return "No items to shuffle."
+            result_message = "No items to shuffle."
+            state_actually_changed = False
 
     elif action_type == "no_action":
-        return "No specific game action identified from your input."
+        result_message = "No specific game action identified from your input."
+        state_actually_changed = False
 
     else:
-        return f"Unknown game action type: {action_type}"
+        result_message = f"Unknown game action type: {action_type}"
+        state_actually_changed = False
+
+    return modified_game_state, result_message, state_actually_changed
+
 
 # --- Flask Routes ---
 
@@ -391,243 +385,265 @@ def index():
     """Serves the main HTML page."""
     return render_template_string(HTML_CONTENT)
 
+# Helper to get game state from request and validate (basic).
+# If no state provided, it defaults to initial.
+def get_state_from_request():
+    try:
+        # data will be the full payload, e.g., {'message': '...', 'game_state': {...}}
+        data = request.json 
+        if data is None: # If request.json failed to parse or was empty
+            raise ValueError("Request body was not valid JSON or was empty.")
+        
+        client_game_state = data.get('game_state') # Extracts the nested game_state
+        if not client_game_state:
+            raise ValueError("No 'game_state' key provided in request JSON.")
+        
+        # Basic validation and key population for safety
+        # This handles cases where new keys are added to get_initial_game_state
+        for key in DEFAULT_INITIAL_GAME_STATE.keys():
+            if key not in client_game_state:
+                client_game_state[key] = DEFAULT_INITIAL_GAME_STATE[key]
+        return client_game_state
+    except Exception as e:
+        print(f"Error parsing client game state from request.json: {e}. Returning initial default.")
+        # Print the full traceback for better debugging
+        import traceback
+        traceback.print_exc()
+        return DEFAULT_INITIAL_GAME_STATE
+
 @app.route('/process_chat', methods=['POST'])
 def process_chat_route():
-    """
-    Receives user chat input, processes it using rule-based logic,
-    updates game state, and returns new state for UI update.
-    """
     user_input = request.json.get('message')
+    client_game_state = get_state_from_request()
+
     if not user_input:
-        return jsonify({"success": False, "message": "No message provided."}), 400
+        return jsonify({"success": False, "message": "No message provided.", "game_state": client_game_state}), 400
 
-    game_state["chat_log"].append({"sender": "You", "message": user_input})
-
-    # Use a copy of the game state for parsing to avoid side effects during parsing itself
-    narrative, game_action = process_user_command(user_input, {k: v for k, v in game_state.items() if k != "chat_log"})
-
+    # Frontend adds 'You' message instantly. Server adds 'Auctioneer' and 'System' messages.
+    narrative, game_action = process_user_command(user_input, client_game_state)
+    
     # Add narrative from rule-based system
-    game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
+    client_game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
 
     if game_action and game_action.get("type") != "no_action":
-        action_result = apply_game_action(game_action)
+        new_game_state, action_result_msg, state_actually_changed = apply_game_action(game_action, client_game_state)
         
-        # Check if action_result is a string (could be from a chained action)
-        # and if the last chat log entry isn't already this system message
-        if isinstance(action_result, str) and \
-           not action_result.startswith("Duplicate action skipped") and \
-           not (game_state["chat_log"] and 
-                game_state["chat_log"][-1]["sender"] == "System" and 
-                game_state["chat_log"][-1]["message"].endswith(action_result)): # Use endswith for messages like "Action processed: Auction started for 'Item'"
-            game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result}"})
-    
-    return jsonify({
-        "success": True,
-        "narrative": narrative, # Frontend can still use this for confirmation, but chat_log is primary
-        "game_state": game_state,
-        "history_available": len(game_state_history) > 0 # Indicate if undo is available
-    })
+        if action_result_msg != "Duplicate action skipped." and state_actually_changed:
+            new_game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result_msg}"})
+        
+        # Ensure player_items consistency for new players
+        for p in new_game_state["participants"]:
+            if p not in new_game_state["player_items"]:
+                new_game_state["player_items"][p] = []
+
+        return jsonify({
+            "success": True,
+            "narrative": narrative,
+            "game_state": new_game_state, # Return the modified state to client
+        })
+    else:
+        # No action, just chat update or error message
+        return jsonify({
+            "success": True, # Still a successful chat processing
+            "narrative": narrative,
+            "game_state": client_game_state # Return original state if no game action
+        })
 
 @app.route('/upload_items', methods=['POST'])
 def upload_items():
-    """
-    Handles uploading a CSV or TXT file to add items to the auction.
-    """
-    if 'file' not in request.files:
-        return jsonify({"success": False, "message": "No file part in the request."}), 400
-
-    file = request.files['file']
-
-    if file.filename == '':
-        return jsonify({"success": False, "message": "No selected file."}), 400
-
-    if file and (file.filename.endswith('.csv') or file.filename.endswith('.txt')):
+    file = request.files.get('file')
+    # CRITICAL FIX: For FormData, game_state is in request.form, not request.json
+    client_game_state_str = request.form.get('game_state')
+    
+    # Default to initial state if string is missing or malformed
+    client_game_state = DEFAULT_INITIAL_GAME_STATE
+    if client_game_state_str:
         try:
-            items = []
-            file_content = file.read().decode('utf-8').strip()
-
-            if file.filename.endswith('.csv'):
-                csv_reader = csv.reader(io.StringIO(file_content))
-                for row in csv_reader:
-                    if row: # Ensure row is not empty
-                        items.append(row[0].strip()) # Assuming item name is in the first column
-            else: # .txt file
-                items = [line.strip() for line in file_content.splitlines() if line.strip()]
-
-            if not items:
-                return jsonify({"success": False, "message": "No valid items found in the file."}), 400
-            
-            action_result = apply_game_action({"type": "add_items", "items": items})
-            
-            return jsonify({
-                "success": True,
-                "message": f"{len(items)} items uploaded successfully.",
-                "game_state": game_state,
-                "history_available": len(game_state_history) > 0
-            })
-
+            client_game_state = json.loads(client_game_state_str)
+            # Basic validation/defaulting for loaded state as in get_state_from_request
+            for key in DEFAULT_INITIAL_GAME_STATE.keys():
+                if key not in client_game_state:
+                    client_game_state[key] = DEFAULT_INITIAL_GAME_STATE[key]
+        except json.JSONDecodeError as e:
+            print(f"Error decoding game_state string from form data: {e}. Using initial default state.")
+            import traceback
+            traceback.print_exc()
+            client_game_state = DEFAULT_INITIAL_GAME_STATE
         except Exception as e:
-            print(f"File upload error: {e}")
-            return jsonify({"success": False, "message": f"Error processing file: {e}"}), 500
-    else:
-        return jsonify({"success": False, "message": "Invalid file type. Please upload a .csv or .txt file."}), 400
+            print(f"Unexpected error processing game_state from form data: {e}. Using initial default state.")
+            import traceback
+            traceback.print_exc()
+            client_game_state = DEFAULT_INITIAL_GAME_STATE
+
+
+    if not file or file.filename == '':
+        return jsonify({"success": False, "message": "No file selected or provided.", "game_state": client_game_state}), 400
+
+    if not (file.filename.endswith('.csv') or file.filename.endswith('.txt')):
+        return jsonify({"success": False, "message": "Invalid file type. Please upload a .csv or .txt file.", "game_state": client_game_state}), 400
+
+    try:
+        items = []
+        file_content = file.read().decode('utf-8').strip()
+
+        if file.filename.endswith('.csv'):
+            csv_reader = csv.reader(io.StringIO(file_content))
+            for row in csv_reader:
+                if row:
+                    items.append(row[0].strip())
+        else: # .txt file
+            items = [line.strip() for line in file_content.splitlines() if line.strip()]
+
+        if not items:
+            return jsonify({"success": False, "message": "No valid items found in the file.", "game_state": client_game_state}), 400
+        
+        new_game_state, action_result_msg, state_actually_changed = apply_game_action({"type": "add_items", "items": items}, client_game_state)
+        
+        if state_actually_changed:
+            new_game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result_msg}"})
+        
+        return jsonify({
+            "success": True,
+            "message": f"{len(items)} items uploaded successfully.",
+            "game_state": new_game_state,
+        })
+
+    except Exception as e:
+        print(f"File upload processing error: {e}")
+        import traceback
+        traceback.print_exc()
+        # Ensure that if an error occurs *during* item processing (not state parsing),
+        # we return the client_game_state as received.
+        return jsonify({"success": False, "message": f"Error processing file: {e}", "game_state": client_game_state}), 500
+
 
 @app.route('/reset_game', methods=['POST'])
 def reset_game():
-    """
-    Resets the entire game state to its initial values.
-    """
-    global game_state
-    global game_state_history
-    game_state = get_initial_game_state()
-    game_state_history = [] # Clear history on full reset
-    game_state["chat_log"].append({"sender": "System", "message": "Game has been reset. Start a new auction!"})
+    # Frontend handles the actual reset of its localStorage state
+    # Server just returns a fresh initial state
     return jsonify({
         "success": True,
         "message": "Game state reset.",
-        "game_state": game_state,
-        "history_available": len(game_state_history) > 0
+        "game_state": DEFAULT_INITIAL_GAME_STATE, # Send the default new state
     })
 
 @app.route('/undo_last_action', methods=['POST'])
 def undo_last_action():
-    """
-    Undoes the last state-changing action by restoring from history.
-    """
-    global game_state
-    global game_state_history
-
-    if not game_state_history:
-        game_state["chat_log"].append({"sender": "System", "message": "No previous state to undo to."})
-        return jsonify({"success": False, "message": "No previous state available.", "game_state": game_state, "history_available": False}), 400
-
-    previous_game_state = game_state_history.pop()
-    game_state = previous_game_state
-    game_state["chat_log"].append({"sender": "System", "message": "Last action has been undone."})
-    
-    # After undo, ensure last_processed_action_hash is cleared to allow immediate re-processing
-    game_state["last_processed_action_hash"] = None 
-
+    # This action is now entirely client-side.
+    # The server simply acknowledges it, but doesn't perform state changes itself.
+    # Frontend will manage its own history array.
+    # We still need to receive a game_state from the client because Flask expects it for POST,
+    # and the client might expect its response to contain a valid game_state.
+    client_game_state = get_state_from_request() 
+    client_game_state["chat_log"].append({"sender": "System", "message": "The undo operation is performed client-side."})
     return jsonify({
         "success": True,
-        "message": "Last action undone.",
-        "game_state": game_state,
-        "history_available": len(game_state_history) > 0
+        "message": "Undo operation acknowledged by server.",
+        "game_state": client_game_state # Return current state (which will be overwritten by client's undo)
     })
 
 
 @app.route('/start_next_auction_action', methods=['POST'])
 def start_next_auction_action():
-    """
-    Initiates an auction for the next available item via a button click.
-    """
-    global game_state
-    if game_state["item_list"] and game_state["status"] in ["waiting_for_auction_start", "item_sold", "game_over"]:
-        item_to_start = game_state["item_list"][0]
+    client_game_state = get_state_from_request()
+
+    if client_game_state["item_list"] and client_game_state["status"] in ["waiting_for_auction_start", "item_sold", "game_over", "waiting_for_items"]:
+        if client_game_state["current_item"] and client_game_state["status"] == "bidding":
+            narrative = f"Auctioneer: An auction for '{client_game_state['current_item']}' is already in progress. Please bid or sell it first."
+            client_game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
+            return jsonify({"success": False, "message": narrative, "game_state": client_game_state}), 400
+
+        item_to_start = client_game_state["item_list"][0]
         narrative = f"Auctioneer: The auction for '{item_to_start}' is now open! Bids begin at 1 credit."
         game_action = {"type": "start_item_auction", "item": item_to_start}
         
-        game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        action_result = apply_game_action(game_action)
-        # Note: If apply_game_action for start_item_auction already added a system message, this would be redundant.
-        # The logic in process_chat_route handles this redundancy.
-        # For direct button calls, we can add it here if it's not already logged.
-        if not (game_state["chat_log"] and 
-                game_state["chat_log"][-1]["sender"] == "System" and 
-                game_state["chat_log"][-1]["message"].endswith(action_result)):
-            game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result}"})
+        client_game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
+        new_game_state, action_result_msg, state_actually_changed = apply_game_action(game_action, client_game_state)
         
-        return jsonify({"success": True, "game_state": game_state, "history_available": len(game_state_history) > 0})
-    elif game_state["status"] == "bidding":
-        narrative = f"Auctioneer: An auction for '{game_state['current_item']}' is already in progress. Please bid or sell it first."
-        game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": False, "message": narrative, "game_state": game_state, "history_available": len(game_state_history) > 0}), 400
+        if state_actually_changed:
+            new_game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result_msg}"})
+        
+        return jsonify({"success": True, "game_state": new_game_state})
     else:
         narrative = "Auctioneer: No items available to start an auction, or game not ready. Please add items first, or initialize the game."
-        game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": False, "message": narrative, "game_state": game_state, "history_available": len(game_state_history) > 0}), 400
+        client_game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
+        return jsonify({"success": False, "message": narrative, "game_state": client_game_state}), 400
 
 @app.route('/sell_current_item_action', methods=['POST'])
 def sell_current_item_action():
-    """
-    Sells the current item to the high bidder (or declares unsold) via a button click.
-    """
-    global game_state
-    if game_state["current_item"]:
-        player_name = game_state["high_bidder"]
-        amount = game_state["current_bid"]
+    client_game_state = get_state_from_request()
 
-        game_action = {"type": "sell_item", "item": game_state["current_item"], "player": player_name, "amount": amount}
+    if client_game_state["current_item"] and client_game_state["status"] == "bidding":
+        player_name = client_game_state["high_bidder"]
+        amount = client_game_state["current_bid"]
+
+        game_action = {"type": "sell_item", "item": client_game_state["current_item"], "player": player_name, "amount": amount}
         
         if player_name and amount > 0:
-            narrative = f"Auctioneer: Going once, going twice... Sold! The '{game_state['current_item']}' goes to {player_name} for {amount} credits!"
+            narrative = f"Auctioneer: Going once, going twice... Sold! The '{client_game_state['current_item']}' goes to {player_name} for {amount} credits!"
         else:
-            narrative = f"Auctioneer: With no bids for '{game_state['current_item']}', it is declared unsold!"
+            narrative = f"Auctioneer: With no bids for '{client_game_state['current_item']}', it is declared unsold!"
 
-        game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        action_result = apply_game_action(game_action)
-        # Same redundancy check as above
-        if not (game_state["chat_log"] and 
-                game_state["chat_log"][-1]["sender"] == "System" and 
-                game_state["chat_log"][-1]["message"].endswith(action_result)):
-            game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result}"})
+        client_game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
+        new_game_state, action_result_msg, state_actually_changed = apply_game_action(game_action, client_game_state)
+        
+        if state_actually_changed:
+            new_game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result_msg}"})
 
-        return jsonify({"success": True, "game_state": game_state, "history_available": len(game_state_history) > 0})
+        return jsonify({"success": True, "game_state": new_game_state})
     else:
         narrative = "Auctioneer: No item currently under auction to sell."
-        game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": False, "message": narrative, "game_state": game_state, "history_available": len(game_state_history) > 0}), 400
+        client_game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
+        return jsonify({"success": False, "message": narrative, "game_state": client_game_state}), 400
 
 @app.route('/shuffle_items_action', methods=['POST'])
 def shuffle_items_action():
-    """
-    Shuffles the remaining items in the item_list.
-    """
-    global game_state
-    if game_state["item_list"]:
-        # Push state to history before shuffling
-        game_state_history.append(copy.deepcopy(game_state))
-        if len(game_state_history) > MAX_HISTORY_SIZE:
-            game_state_history.pop(0)
+    client_game_state = get_state_from_request()
 
-        random.shuffle(game_state["item_list"])
-        game_state["chat_log"].append({"sender": "System", "message": "The remaining items have been shuffled!"})
+    if client_game_state["item_list"]:
         narrative = "Auctioneer: A little shake-up in the inventory! Items have been reordered."
-        game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": True, "game_state": game_state, "history_available": len(game_state_history) > 0})
+        client_game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
+
+        new_game_state, action_result_msg, state_actually_changed = apply_game_action({"type": "shuffle_items"}, client_game_state)
+        
+        if state_actually_changed:
+            new_game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result_msg}"})
+        
+        return jsonify({"success": True, "game_state": new_game_state})
     else:
         narrative = "Auctioneer: No items available to shuffle yet."
-        game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": False, "message": narrative, "game_state": game_state, "history_available": len(game_state_history) > 0}), 400
+        client_game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
+        return jsonify({"success": False, "message": narrative, "game_state": client_game_state}), 400
 
 @app.route('/set_inventory_sort', methods=['POST'])
 def set_inventory_sort():
-    """
-    Sets the sorting preference for player inventories.
-    """
-    global game_state
     sort_key = request.json.get('key')
     sort_order = request.json.get('order')
+    client_game_state = get_state_from_request()
 
     if sort_key not in ['name', 'price'] or sort_order not in ['asc', 'desc']:
-        return jsonify({"success": False, "message": "Invalid sort key or order."}), 400
+        return jsonify({"success": False, "message": "Invalid sort key or order.", "game_state": client_game_state}), 400
 
-    # Sort preference isn't a core game action, but for consistency, we'll push to history.
-    game_state_history.append(copy.deepcopy(game_state))
-    if len(game_state_history) > MAX_HISTORY_SIZE:
-        game_state_history.pop(0)
+    new_game_state = copy.deepcopy(client_game_state) # Only for sorting, not a major game action
+    new_game_state["player_inventory_sort"] = {"key": sort_key, "order": sort_order}
+    new_game_state["chat_log"].append({"sender": "System", "message": f"Player inventories will now be sorted by {sort_key} ({sort_order})."})
+    
+    action_hash = hash(json.dumps({"type": "set_inventory_sort", "key": sort_key, "order": sort_order}, sort_keys=True))
+    new_game_state["last_processed_action_hash"] = action_hash
 
-    game_state["player_inventory_sort"] = {"key": sort_key, "order": sort_order}
-    game_state["chat_log"].append({"sender": "System", "message": f"Player inventories will now be sorted by {sort_key} ({sort_order})."})
-    return jsonify({"success": True, "game_state": game_state, "history_available": len(game_state_history) > 0})
+    return jsonify({"success": True, "game_state": new_game_state})
 
 
 @app.route('/get_game_state', methods=['GET'])
 def get_game_state_route():
     """
-    Returns the current full game state. Useful for initial load and periodic updates.
+    Returns the initial default game state structure. The client will use this
+    if it doesn't find a saved state in its localStorage.
+    No `history_available` here as history is client-side.
     """
-    return jsonify(game_state, {"history_available": len(game_state_history) > 0})
+    return jsonify({
+        "game_state": DEFAULT_INITIAL_GAME_STATE
+    })
 
 # --- Embedded HTML, CSS, JavaScript ---
 
@@ -966,6 +982,9 @@ HTML_CONTENT = """
         }
 
         /* --- Right Panel (Chat Interface & Command Assistant) --- */
+        .right-panel {
+            min-height: 500px; /* Ensure chat area has minimum height */
+        }
         .chat-log {
             overflow-y: auto; 
             overflow-x: hidden; 
@@ -980,6 +999,7 @@ HTML_CONTENT = """
             min-height: 150px; 
             scroll-behavior: smooth;
             word-wrap: break-word; 
+            flex-grow: 1; /* Allow chat log to grow */
         }
         .chat-message {
             margin-bottom: 12px;
@@ -1343,34 +1363,118 @@ HTML_CONTENT = """
                     <li><strong>Start Game:</strong> <code>start game players John, Jane budget 100</code></li>
                     <li><strong>Add Items:</strong> <code>add Car, House, Boat</code></li>
                     <li><strong>Start Auction:</strong> <code>auction Car</code> or <code>auction first</code></li>
-                    <li><strong>Place Bid:</strong> <code>John bid 10</code> (replace 'John' and '10')</li>
+                    <li><strong>Place Bid:</b> <code>John bid 10</code> (replace 'John' and '10')</li>
                     <li><strong>Sell Item:</strong> <code>sell it</code> (sells to high bidder) or <code>sell John 50</code></li>
-                    <li><strong>No Sale:</strong> <code>no sale</code></li>
-                    <li><strong>Pass:</strong> <code>Jane pass</code> (replace 'Jane')</li>
-                    <li><strong>Shuffle:</strong> <code>shuffle</code></li>
+                    <li><strong>No Sale:</b> <code>no sale</code></li>
+                    <li><strong>Pass:</b> <code>Jane pass</code> (replace 'Jane')</li>
+                    <li><strong>Shuffle:</b> <code>shuffle</code></li>
                 </ul>
             </div>
         </div>
     </div>
     <footer>
-        Powered by Rule-Based Logic (Python/Flask). Designed for zero human effort deployment.
+        Made with &#10084; by Souparna Paul &copy; 2025
     </footer>
 
     <script>
-        // Store current sort preference for inventories
-        let currentInventorySort = { key: 'name', order: 'asc' };
-        let currentInventorySearchTerm = '';
-        let currentGameState = {}; // Store the last fetched game state
+        const LOCAL_STORAGE_KEY = 'auctionGame';
+        const MAX_HISTORY_SIZE = 20; // Client-side undo history limit
+        const MAX_CHAT_LOG_FOR_SERVER = 50; // Max chat entries sent to server
+        const MAX_AUCTION_HISTORY_FOR_SERVER = 20; // Max auction history entries sent to server
 
+
+        let currentGameState = {};
+        let game_state_history = []; // Client-side history for undo
+        let lastKnownChatLogLength = 0; 
+        let currentInventorySearchTerm = '';
+        // currentInventorySort will be read from currentGameState.player_inventory_sort
+        // on UI update, so no separate global needed if it's part of gameState.
+
+        // --- Local Storage Functions ---
+        function saveToLocalStorage(state) {
+            try {
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+            } catch (e) {
+                console.error("Error saving to local storage:", e);
+                alert("Warning: Could not save game progress to your browser's local storage. Storage might be full.");
+            }
+        }
+
+        function loadFromLocalStorage() {
+            try {
+                const serializedState = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (serializedState === null) {
+                    return undefined; // No state found
+                }
+                const loaded = JSON.parse(serializedState);
+                // The actual defaultState structure is now fetched once on DOMContentLoaded
+                // and used for this merging, as it might evolve.
+                return loaded;
+            } catch (e) {
+                console.error("Error loading from local storage:", e);
+                alert("Warning: Saved game data is corrupted. Starting a new game.");
+                clearLocalStorage(); // Clear corrupted data
+                return undefined; // Corrupted state
+            }
+        }
+
+        function clearLocalStorage() {
+            try {
+                localStorage.removeItem(LOCAL_STORAGE_KEY);
+            } catch (e) {
+                console.error("Error clearing local storage:", e);
+            }
+        }
+
+        // --- Initialization ---
         document.addEventListener('DOMContentLoaded', () => {
-            fetchGameState(); // Fetch initial state on load
+            // Fetch initial default state once to get the structure, then use it for loading/initializing
+            fetch('/get_game_state')
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return response.json();
+                })
+                .then(data => {
+                    const initialDefaultState = data.game_state; // This is the server's default empty state
+
+                    let storedState = loadFromLocalStorage();
+                    if (storedState) {
+                        // Merge default initial state keys into storedState for forward compatibility
+                        for (const key in initialDefaultState) {
+                            if (storedState[key] === undefined) {
+                                storedState[key] = initialDefaultState[key];
+                            }
+                        }
+                        currentGameState = storedState;
+                        console.log("Loading game state from local storage.");
+                        // Reconstruct history if possible (not saving game_state_history to localStorage directly)
+                        // so undo history will be reset on full page reload.
+                    } else {
+                        console.log("No state in local storage. Initializing with default state.");
+                        currentGameState = initialDefaultState;
+                        saveToLocalStorage(currentGameState); // Save this default state
+                    }
+                    
+                    lastKnownChatLogLength = currentGameState.chat_log.length;
+                    // Ensure player_inventory_sort is set, even if loaded state didn't have it
+                    if (!currentGameState.player_inventory_sort) {
+                        currentGameState.player_inventory_sort = { key: 'name', order: 'asc' };
+                        saveToLocalStorage(currentGameState); // Persist this new default
+                    }
+                    updateUI();
+                })
+                .catch(error => {
+                    console.error('Error fetching default game state structure:', error);
+                    addChatMessage('System Error', `Could not fetch initial game state structure from server. Please refresh. Details: ${error.message || error}`, 'System');
+                });
+
+
             document.getElementById('user-message').addEventListener('keypress', function(event) {
                 if (event.key === 'Enter') {
                     sendMessage();
                 }
             });
 
-            // Event listeners for inventory sort buttons
             document.querySelectorAll('.inventory-sort-controls .sort-btn').forEach(button => {
                 button.addEventListener('click', () => {
                     const key = button.dataset.key;
@@ -1379,13 +1483,11 @@ HTML_CONTENT = """
                 });
             });
 
-            // Event listener for inventory search input
             document.getElementById('inventory-search-input').addEventListener('input', function() {
                 currentInventorySearchTerm = this.value.toLowerCase().trim();
-                updateUI(currentGameState); // Re-render inventories based on new search term
+                updateUI();
             });
 
-            // Make command assistant codes clickable
             document.querySelectorAll('.command-assistant code').forEach(codeElement => {
                 codeElement.addEventListener('click', () => {
                     document.getElementById('user-message').value = codeElement.textContent.trim();
@@ -1394,45 +1496,131 @@ HTML_CONTENT = """
             });
         });
 
-        async function fetchGameState() {
-            try {
-                const response = await fetch('/get_game_state');
-                const data = await response.json();
-                currentGameState = data[0]; // State is now at index 0, history_available at 1
-                const historyAvailable = data[1].history_available;
+        /**
+         * Creates a copy of the game state suitable for sending to the server,
+         * truncating large arrays like chat_log and auction_history to minimize payload size.
+         * The client's local `currentGameState` retains the full history.
+         */
+        function trimGameStateForServer(state) {
+            const trimmedState = JSON.parse(JSON.stringify(state)); // Deep copy to avoid modifying original
 
-                currentInventorySort = currentGameState.player_inventory_sort || { key: 'name', order: 'asc' }; 
-                updateUI(currentGameState, historyAvailable);
-            } catch (error) {
-                console.error('Error fetching game state:', error);
-                addChatMessage('System Error', 'Could not connect to the server. Please refresh.', 'System');
+            // Truncate chat_log if it's too long
+            if (trimmedState.chat_log.length > MAX_CHAT_LOG_FOR_SERVER) {
+                trimmedState.chat_log = trimmedState.chat_log.slice(-MAX_CHAT_LOG_FOR_SERVER);
+            }
+
+            // Truncate auction_history if it's too long
+            if (trimmedState.auction_history.length > MAX_AUCTION_HISTORY_FOR_SERVER) {
+                trimmedState.auction_history = trimmedState.auction_history.slice(-MAX_AUCTION_HISTORY_FOR_SERVER);
+            }
+            return trimmedState;
+        }
+
+        /**
+         * Merges the server's response game state into the client's local currentGameState.
+         * This function assumes the server's `chat_log` and `auction_history` are the
+         * most up-to-date (potentially truncated) version, and we replace our local
+         * versions with them. This is a trade-off for payload size.
+         */
+        function mergeServerState(serverState) {
+            // Update all fields except chat_log and auction_history directly
+            for (const key in serverState) {
+                if (key !== 'chat_log' && key !== 'auction_history') {
+                    currentGameState[key] = serverState[key];
+                }
+            }
+            
+            // For chat_log and auction_history, we replace the local version with the server's.
+            // This means older entries (beyond MAX_CHAT_LOG_FOR_SERVER / MAX_AUCTION_HISTORY_FOR_SERVER)
+            // will effectively be lost if the server-side processing truncated them.
+            currentGameState.chat_log = serverState.chat_log;
+            currentGameState.auction_history = serverState.auction_history;
+
+             // Ensure player_items consistency for new players added on server (e.g., via init_game)
+            if (currentGameState.participants && currentGameState.player_items) {
+                for (const player in currentGameState.participants) {
+                    if (currentGameState.player_items[player] === undefined) {
+                        currentGameState.player_items[player] = [];
+                    }
+                }
+                // Remove players who might have been removed from participants but still in player_items
+                for (const player in currentGameState.player_items) {
+                    if (currentGameState.participants[player] === undefined) {
+                        delete currentGameState.player_items[player];
+                    }
+                }
             }
         }
 
+
+        // --- Generic Send Action Function ---
+        async function sendActionToServer(endpoint, payload) {
+            try {
+                // IMPORTANT: Send a TRIMMED version of game_state to the server
+                const trimmedGameState = trimGameStateForServer(currentGameState);
+                const fullPayload = { ...payload, game_state: trimmedGameState };
+                
+                // For /process_chat, add "You" message to local state *before* sending, for immediate feedback
+                // and to ensure it's captured in history. Server will also append it to its trimmed log.
+                if (endpoint === '/process_chat' && payload.message) {
+                    currentGameState.chat_log.push({"sender": "You", "message": payload.message});
+                    // lastKnownChatLogLength will be updated by updateUI, or reset if mergeServerState makes it shorter
+                    updateUI(); // Immediate UI update for the 'You' message
+                }
+                
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(fullPayload),
+                });
+
+                // Check for HTTP errors (4xx, 5xx) before attempting to parse JSON
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server responded with status ${response.status}: ${errorText}`);
+                }
+
+                const data = await response.json(); // If this fails, it goes to catch
+                
+                if (data.success) {
+                    // Update client-side game state by merging server's response
+                    mergeServerState(data.game_state);
+                    saveToLocalStorage(currentGameState); // Persist to local storage
+                    pushToHistory(currentGameState); // Only push to history on successful state change
+                    updateUI(); // Update UI with server's full response
+                } else {
+                    alert('Error: ' + data.message); // Display server-side error message
+                    // Even if server returns success: false, it might still return an updated game_state
+                    // (e.g., chat_log updated with an error message). So, merge if present.
+                    if (data.game_state) {
+                        mergeServerState(data.game_state);
+                        saveToLocalStorage(currentGameState);
+                        // No history push if server indicated error and didn't change game state meaningfully
+                        updateUI();
+                    }
+                }
+                return data;
+            } catch (error) {
+                console.error(`Network error during ${endpoint}:`, error);
+                alert(`Network error or server issue during ${endpoint}. Please try again. Details: ${error.message || error}`);
+                // If a network error occurs, the client's currentGameState might be stale.
+                // We don't automatically reset or revert here to avoid data loss.
+                // User can manually reset or retry.
+                return { success: false, message: `Network error during ${endpoint}.` };
+            }
+        }
+
+        // --- Action Handlers ---
         async function sendMessage() {
             const userMessageInput = document.getElementById('user-message');
             const message = userMessageInput.value.trim();
             if (!message) return;
 
             userMessageInput.value = ''; // Clear input field
-
-            const response = await fetch('/process_chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ message: message }),
-            });
-            const data = await response.json();
-            
-            if (data.success) {
-                currentGameState = data.game_state; // Update stored state
-                updateUI(data.game_state, data.history_available);
-            } else {
-                console.error('Error processing chat:', data.message);
-                addChatMessage('System Error', data.message, 'System');
-                updateUI(data.game_state, data.history_available); // Update UI even on error to show latest state/chat
-            }
+            // 'You' message is added to local state BEFORE sending for instant feedback
+            await sendActionToServer('/process_chat', { message: message });
         }
 
         async function uploadItems() {
@@ -1446,26 +1634,41 @@ HTML_CONTENT = """
 
             const formData = new FormData();
             formData.append('file', file);
+            // IMPORTANT: Send a TRIMMED version of game_state with the file upload
+            const trimmedGameState = trimGameStateForServer(currentGameState);
+            formData.append('game_state', JSON.stringify(trimmedGameState)); 
 
             try {
                 const response = await fetch('/upload_items', {
                     method: 'POST',
-                    body: formData,
+                    body: formData, // FormData automatically sets 'Content-Type': 'multipart/form-data'
                 });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server responded with status ${response.status}: ${errorText}`);
+                }
+
                 const data = await response.json();
 
                 if (data.success) {
-                    currentGameState = data.game_state; // Update stored state
-                    updateUI(data.game_state, data.history_available);
-                    addChatMessage('System', data.message, 'System');
+                    mergeServerState(data.game_state);
+                    saveToLocalStorage(currentGameState);
+                    pushToHistory(currentGameState); // Only push to history on successful state change
+                    updateUI();
                 } else {
                     alert('Error uploading items: ' + data.message);
+                    if (data.game_state) { // Server might return state even on error
+                        mergeServerState(data.game_state);
+                        saveToLocalStorage(currentGameState);
+                        updateUI();
+                    }
                 }
             } catch (error) {
                 console.error('Error uploading items:', error);
-                alert('Network error or server issue during upload.');
+                alert(`Network error or server issue during upload. Details: ${error.message || error}`);
             } finally {
-                fileInput.value = ''; // Clear the file input
+                fileInput.value = '';
             }
         }
 
@@ -1473,145 +1676,85 @@ HTML_CONTENT = """
             if (!confirm('Are you sure you want to reset the game? All current progress will be lost.')) {
                 return;
             }
+            clearLocalStorage();
+            game_state_history = []; // Clear client-side history
+            
             try {
-                const response = await fetch('/reset_game', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({}), // Empty body for a reset action
+                const response = await fetch('/reset_game', { // This endpoint now just returns a fresh default
+                    method: 'POST', // Use POST for consistency with actions, though it's a GET-like operation conceptually
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ /* No client state needed for server to return default */ })
                 });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server responded with status ${response.status} during reset: ${errorText}`);
+                }
+
                 const data = await response.json();
                 if (data.success) {
-                    currentGameState = data.game_state; // Update stored state
-                    updateUI(data.game_state, data.history_available);
-                    // Clear existing chat log and then re-add initial messages
-                    const chatLog = document.getElementById('chat-log');
-                    chatLog.innerHTML = '';
-                    for (const chatEntry of data.game_state.chat_log) {
-                        addChatMessage(chatEntry.sender, chatEntry.message, chatEntry.sender);
-                    }
-                    chatLog.scrollTop = chatLog.scrollHeight;
+                    currentGameState = data.game_state; // Server sends back the clean initial state
+                    saveToLocalStorage(currentGameState);
+                    lastKnownChatLogLength = currentGameState.chat_log.length; // Reset chat length tracker
+                    updateUI();
+                    alert("Game has been reset to its initial state.");
                 } else {
                     alert('Failed to reset game: ' + data.message);
                 }
             } catch (error) {
                 console.error('Error resetting game:', error);
-                alert('Network error during game reset.');
+                alert(`Network error during game reset. Please try again. Details: ${error.message || error}`);
+                // Fallback: If server is unreachable, just clear locally and use an immediate in-memory default
+                // This would require defining a local default in JS. For now, if server is down, it's problematic.
+                // Re-fetching the default state at page load will handle this if the server comes back up.
+                // For simplicity, we'll let the user retry or refresh.
+            }
+        }
+
+        function pushToHistory(state) {
+            // Only push if the state is actually different from the last history entry
+            if (!game_state_history.length || JSON.stringify(state) !== JSON.stringify(game_state_history[game_state_history.length - 1])) {
+                game_state_history.push(JSON.parse(JSON.stringify(state))); // Deep copy
+                if (game_state_history.length > MAX_HISTORY_SIZE) {
+                    game_state_history.shift(); // Remove oldest
+                }
             }
         }
 
         async function undoLastAction() {
-            if (!confirm('Are you sure you want to undo the last action?')) {
-                return;
+            if (game_state_history.length > 0) {
+                const previousState = game_state_history.pop();
+                currentGameState = previousState;
+                saveToLocalStorage(currentGameState);
+                alert("Last action has been undone.");
+                lastKnownChatLogLength = currentGameState.chat_log.length; // Reset chat length tracker
+                updateUI();
+            } else {
+                alert("No previous state to undo to.");
             }
-            try {
-                const response = await fetch('/undo_last_action', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                const data = await response.json();
-                if (data.success) {
-                    currentGameState = data.game_state;
-                    updateUI(data.game_state, data.history_available);
-                    // Rebuild chat log for a full revert
-                    const chatLog = document.getElementById('chat-log');
-                    chatLog.innerHTML = '';
-                    for (const chatEntry of data.game_state.chat_log) {
-                        addChatMessage(chatEntry.sender, chatEntry.message, chatEntry.sender);
-                    }
-                    chatLog.scrollTop = chatLog.scrollHeight;
-                } else {
-                    alert('Failed to undo action: ' + data.message);
-                }
-            } catch (error) {
-                console.error('Error undoing action:', error);
-                alert('Network error during undo.');
-            }
+            // Server doesn't need to know about undo, as it's purely client-side state manipulation.
         }
 
-
         async function startNextAuction() {
-            try {
-                const response = await fetch('/start_next_auction_action', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                const data = await response.json();
-                if (data.success) {
-                    currentGameState = data.game_state; 
-                    updateUI(data.game_state, data.history_available);
-                } else {
-                    alert('Error starting auction: ' + data.message);
-                }
-            } catch (error) {
-                console.error('Error starting auction:', error);
-                alert('Network error during auction start.');
-            }
+            await sendActionToServer('/start_next_auction_action', {});
         }
 
         async function sellCurrentItem() {
-            try {
-                const response = await fetch('/sell_current_item_action', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                const data = await response.json();
-                if (data.success) {
-                    currentGameState = data.game_state; 
-                    updateUI(data.game_state, data.history_available);
-                } else {
-                    alert('Error selling item: ' + data.message);
-                }
-            } catch (error) {
-                console.error('Error selling item:', error);
-                alert('Network error during item sale.');
-            }
+            await sendActionToServer('/sell_current_item_action', {});
         }
 
         async function shuffleItems() {
-            try {
-                const response = await fetch('/shuffle_items_action', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                const data = await response.json();
-                if (data.success) {
-                    currentGameState = data.game_state; 
-                    updateUI(data.game_state, data.history_available);
-                } else {
-                    alert('Error shuffling items: ' + data.message);
-                }
-            } catch (error) {
-                console.error('Error shuffling items:', error);
-                alert('Network error during item shuffle.');
-            }
+            await sendActionToServer('/shuffle_items_action', {});
         }
 
         async function setInventorySort(key, order) {
-            try {
-                const response = await fetch('/set_inventory_sort', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: key, order: order })
-                });
-                const data = await response.json();
-                if (data.success) {
-                    currentGameState = data.game_state; 
-                    currentInventorySort = { key: key, order: order }; 
-                    updateUI(data.game_state, data.history_available); 
-                } else {
-                    console.error('Error setting inventory sort:', data.message);
-                }
-            } catch (error) {
-                console.error('Network error during setting inventory sort:', error);
-            }
+            // Update local preference first for immediate UI responsiveness
+            currentGameState.player_inventory_sort = { key: key, order: order }; 
+            await sendActionToServer('/set_inventory_sort', { key: key, order: order });
+            // updateUI will be called by sendActionToServer after server confirms
         }
 
+        // --- UI Update Function ---
         function addChatMessage(sender, message, type) {
             const chatLog = document.getElementById('chat-log');
             const div = document.createElement('div');
@@ -1621,25 +1764,25 @@ HTML_CONTENT = """
             chatLog.scrollTop = chatLog.scrollHeight; 
         }
 
-        function updateUI(gameState, historyAvailable = false) {
+        function updateUI() {
             // Update Status Message
             const statusMessageDiv = document.getElementById('status-message');
             let statusText = "Game Status: ";
             let statusClass = "info"; 
 
-            if (gameState.status === "waiting_for_init") {
+            if (currentGameState.status === "waiting_for_init") {
                 statusText += "Waiting for game initialization.";
                 statusClass = "warning";
-            } else if (gameState.status === "waiting_for_items") {
+            } else if (currentGameState.status === "waiting_for_items") {
                 statusText += "Game initialized. Waiting for items.";
                 statusClass = "warning";
-            } else if (gameState.status === "waiting_for_auction_start" || gameState.status === "item_sold") {
+            } else if (currentGameState.status === "waiting_for_auction_start" || currentGameState.status === "item_sold") {
                 statusText += "Items added. Ready to start next auction.";
                 statusClass = "info"; 
-            } else if (gameState.status === "bidding") {
-                statusText += `Auction for '${gameState.current_item}' is active.`;
+            } else if (currentGameState.status === "bidding") {
+                statusText += `Auction for '${currentGameState.current_item}' is active.`;
                 statusClass = "success";
-            } else if (gameState.status === "game_over") {
+            } else if (currentGameState.status === "game_over") {
                 statusText += "Game Over - All items processed!";
                 statusClass = "error";
             }
@@ -1647,9 +1790,9 @@ HTML_CONTENT = """
             statusMessageDiv.className = `status-message ${statusClass}`;
 
             // Update Current Auction Info
-            document.getElementById('auction-item').textContent = gameState.current_item || 'None';
-            document.getElementById('current-bid').textContent = gameState.current_bid || 0;
-            document.getElementById('high-bidder').textContent = gameState.high_bidder || 'None';
+            document.getElementById('auction-item').textContent = currentGameState.current_item || 'None';
+            document.getElementById('current-bid').textContent = currentGameState.current_bid || 0;
+            document.getElementById('high-bidder').textContent = currentGameState.high_bidder || 'None';
 
             // Enable/Disable Auction Control Buttons
             const startAuctionBtn = document.getElementById('start-auction-btn');
@@ -1657,23 +1800,24 @@ HTML_CONTENT = """
             const shuffleItemsBtn = document.getElementById('shuffle-items-btn');
             const undoBtn = document.getElementById('undo-btn');
 
-            startAuctionBtn.disabled = !gameState.item_list.length || gameState.status === "bidding" || gameState.status === "game_over";
-            sellItemBtn.disabled = !gameState.current_item || gameState.status !== "bidding";
-            shuffleItemsBtn.disabled = !gameState.item_list.length;
-            undoBtn.disabled = !historyAvailable;
+            startAuctionBtn.disabled = !currentGameState.item_list.length || currentGameState.status === "bidding" || currentGameState.status === "game_over";
+            sellItemBtn.disabled = !currentGameState.current_item || currentGameState.status !== "bidding";
+            shuffleItemsBtn.disabled = !currentGameState.item_list.length;
+            undoBtn.disabled = game_state_history.length === 0;
 
 
             // Update Participants List
             const participantsList = document.getElementById('participants-list');
             participantsList.innerHTML = '';
-            if (Object.keys(gameState.participants).length === 0) {
+            if (Object.keys(currentGameState.participants).length === 0) {
                 participantsList.innerHTML = '<li>No participants yet.</li>';
             } else {
-                for (const player in gameState.participants) {
+                for (const player in currentGameState.participants) {
                     const li = document.createElement('li');
-                    const ownedItemsCount = gameState.player_items[player] ? gameState.player_items[player].length : 0;
+                    // Ensure player_items key exists for the player to prevent error
+                    const ownedItemsCount = currentGameState.player_items[player] ? currentGameState.player_items[player].length : 0;
                     li.innerHTML = `<span>${player}</span> 
-                                    <span class="player-budget">${gameState.participants[player]} credits</span>
+                                    <span class="player-budget">${currentGameState.participants[player]} credits</span>
                                     <span class="player-item-count">(${ownedItemsCount} items)</span>`;
                     participantsList.appendChild(li);
                 }
@@ -1684,16 +1828,16 @@ HTML_CONTENT = """
             const itemsRemainingCountSpan = document.getElementById('items-remaining-count');
             itemsRemainingList.innerHTML = '';
             
-            let displayItems = [...gameState.item_list];
-            if (gameState.current_item && gameState.status === "bidding") {
-                const currentItemIndex = displayItems.indexOf(gameState.current_item);
+            let displayItems = [...currentGameState.item_list];
+            if (currentGameState.current_item && currentGameState.status === "bidding") {
+                const currentItemIndex = displayItems.indexOf(currentGameState.current_item);
                 if (currentItemIndex > -1) {
                     displayItems.splice(currentItemIndex, 1); 
                 }
-                displayItems.unshift(gameState.current_item + " (current)"); 
+                displayItems.unshift(currentGameState.current_item + " (current)"); 
             }
 
-            itemsRemainingCountSpan.textContent = `(${gameState.item_list.length})`; 
+            itemsRemainingCountSpan.textContent = `(${currentGameState.item_list.length})`; 
 
             if (displayItems.length === 0) {
                 itemsRemainingList.innerHTML = '<li>No items remaining.</li>';
@@ -1711,19 +1855,19 @@ HTML_CONTENT = """
             playerInventoriesList.innerHTML = '';
             let hasItemsBought = false;
 
-            // Update active sort buttons
+            // Update active sort buttons based on currentGameState.player_inventory_sort
             document.querySelectorAll('.inventory-sort-controls .sort-btn').forEach(button => {
                 const key = button.dataset.key;
                 const order = button.dataset.order;
-                if (key === currentInventorySort.key && order === currentInventorySort.order) {
+                if (currentGameState.player_inventory_sort && key === currentGameState.player_inventory_sort.key && order === currentGameState.player_inventory_sort.order) {
                     button.classList.add('active');
                 } else {
                     button.classList.remove('active');
                 }
             });
 
-            for (const player in gameState.player_items) {
-                const filteredItems = gameState.player_items[player].filter(item => 
+            for (const player in currentGameState.player_items) {
+                const filteredItems = currentGameState.player_items[player].filter(item => 
                     item.name.toLowerCase().includes(currentInventorySearchTerm)
                 );
 
@@ -1731,16 +1875,20 @@ HTML_CONTENT = """
                 
                 playerItems.sort((a, b) => {
                     let compareA, compareB;
-                    if (currentInventorySort.key === 'name') {
+                    // Use currentGameState.player_inventory_sort here
+                    const sortKey = currentGameState.player_inventory_sort.key;
+                    const sortOrder = currentGameState.player_inventory_sort.order;
+
+                    if (sortKey === 'name') {
                         compareA = a.name.toLowerCase();
                         compareB = b.name.toLowerCase();
-                    } else { 
+                    } else { // 'price'
                         compareA = a.price;
                         compareB = b.price;
                     }
 
-                    if (compareA < compareB) return currentInventorySort.order === 'asc' ? -1 : 1;
-                    if (compareA > compareB) return currentInventorySort.order === 'asc' ? 1 : -1;
+                    if (compareA < compareB) return sortOrder === 'asc' ? -1 : 1;
+                    if (compareA > compareB) return sortOrder === 'asc' ? 1 : -1;
                     return 0; 
                 });
 
@@ -1768,31 +1916,33 @@ HTML_CONTENT = """
             // Update Auction History
             const auctionHistoryList = document.getElementById('auction-history-list');
             auctionHistoryList.innerHTML = '';
-            if (gameState.auction_history.length === 0) {
+            // Display full local history, not just server's potentially trimmed version
+            if (currentGameState.auction_history.length === 0) {
                 auctionHistoryList.innerHTML = '<li>No items sold yet.</li>';
             } else {
-                [...gameState.auction_history].reverse().forEach(entry => {
+                // Display in reverse order (most recent first)
+                [...currentGameState.auction_history].reverse().forEach(entry => {
                     const li = document.createElement('li');
                     li.textContent = entry;
                     auctionHistoryList.appendChild(li);
                 });
             }
 
-            // Update Chat Log
-            const chatLog = document.getElementById('chat-log');
-            const lastLogMessage = gameState.chat_log.length > 0 ? gameState.chat_log[gameState.chat_log.length - 1] : null;
-            const lastDisplayedMessageDiv = chatLog.lastElementChild;
-            const lastDisplayedMessageText = lastDisplayedMessageDiv ? lastDisplayedMessageDiv.textContent : null;
-
-            if (!lastLogMessage || !lastDisplayedMessageText || 
-                !lastDisplayedMessageText.includes(lastLogMessage.message)
-            ) {
-                chatLog.innerHTML = ''; 
-                for (const chatEntry of gameState.chat_log) {
+            // Incremental Chat Log Update Logic (retained)
+            const chatLogDiv = document.getElementById('chat-log');
+            if (currentGameState.chat_log.length < lastKnownChatLogLength) {
+                chatLogDiv.innerHTML = '';
+                for (const chatEntry of currentGameState.chat_log) {
+                    addChatMessage(chatEntry.sender, chatEntry.message, chatEntry.sender);
+                }
+            } else if (currentGameState.chat_log.length > lastKnownChatLogLength) {
+                for (let i = lastKnownChatLogLength; i < currentGameState.chat_log.length; i++) {
+                    const chatEntry = currentGameState.chat_log[i];
                     addChatMessage(chatEntry.sender, chatEntry.message, chatEntry.sender);
                 }
             }
-            chatLog.scrollTop = chatLog.scrollHeight; 
+            lastKnownChatLogLength = currentGameState.chat_log.length; // Update the last known length
+            chatLogDiv.scrollTop = chatLogDiv.scrollHeight; // Scroll to bottom for latest messages
         }
     </script>
 </body>

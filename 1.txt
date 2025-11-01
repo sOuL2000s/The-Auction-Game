@@ -4,12 +4,11 @@ import random
 import re # Import for regular expressions
 import csv
 import io
+import copy # Import for deep copying game state
 
 from flask import Flask, request, jsonify, render_template_string
 
 # --- Configuration ---
-# Removed GEMINI_API_KEY and GEMINI_MODEL_NAME as AI is no longer used.
-
 app = Flask(__name__)
 
 # --- Game State ---
@@ -24,12 +23,14 @@ def get_initial_game_state():
         "current_bid": 0,
         "high_bidder": None,
         "status": "waiting_for_init", # waiting_for_init, waiting_for_items, waiting_for_auction_start, bidding, game_over, item_sold (interim status for auto-start)
-        "chat_log": [{"sender": "Auctioneer", "message": "Welcome to the Rule-Based Auctioneer Game! To begin, type: `Start a new auction game with players John, Jane, Mike, and a budget of 100 for everyone.` (Or add your own player names and budget!)"}],      # For displaying chat messages in the UI
+        "chat_log": [{"sender": "Auctioneer", "message": "Welcome! To begin, type: `start game players John, Jane budget 100` (Or add your own player names and budget!)."}],      # For displaying chat messages in the UI
         "last_processed_action_hash": None, # To prevent reprocessing same action from simple parsing
         "player_inventory_sort": {"key": "name", "order": "asc"} # Default sort for inventories
     }
 
 game_state = get_initial_game_state()
+game_state_history = [] # Stack to store previous game states for undo
+MAX_HISTORY_SIZE = 20 # Limit history size to prevent excessive memory usage
 
 # --- Rule-Based Command Processing ---
 
@@ -43,45 +44,101 @@ def process_user_command(user_input, current_game_state_for_logic):
     
     user_input_lower = user_input.lower().strip()
 
-    # 1. Initialize Game
-    match = re.match(r"start a new auction game with players ([\w,\s]+) and a budget of (\d+)(?: for everyone)?\.?", user_input_lower)
+    # 1. Initialize Game (Simplified)
+    match = re.match(r"start game players ([\w,\s]+) budget (\d+)\.?$", user_input_lower)
     if match and current_game_state_for_logic["status"] == "waiting_for_init":
         player_names = [p.strip() for p in match.group(1).split(',') if p.strip()]
         budget = int(match.group(2))
         if player_names and budget > 0:
-            narrative = f"Welcome, {', '.join(player_names)}! Each of you starts with {budget} credits. Let the game begin!"
+            narrative = f"Welcome, {', '.join(p.title() for p in player_names)}! Each of you starts with {budget} credits. Let the game begin!"
             game_action = {"type": "init_game", "players": player_names, "budget": budget}
             return narrative, game_action
         else:
-            narrative = "Invalid players or budget specified for starting the game. Please use: `Start a new auction game with players John, Jane, and a budget of 100.`"
+            narrative = "Invalid players or budget specified for starting the game. Please use: `start game players John, Jane budget 100`."
             return narrative, {"type": "no_action"}
     elif match and current_game_state_for_logic["status"] != "waiting_for_init":
         narrative = "A game is already in progress. Please reset the game to start a new one."
         return narrative, {"type": "no_action"}
 
-
-    # 2. Add Items
-    match = re.match(r"add items: (.*)", user_input_lower)
-    if match and current_game_state_for_logic["status"] in ["waiting_for_items", "waiting_for_auction_start", "game_over", "bidding", "item_sold"]: # Allow adding items at various stages
+    # 2. Add Items (Simplified)
+    match = re.match(r"add (.*)", user_input_lower)
+    if match and current_game_state_for_logic["status"] != "waiting_for_init": # Allow adding items at various stages
         items_str = match.group(1)
         items = [item.strip() for item in items_str.split(',') if item.strip()]
         if items:
-            narrative = f"Excellent! We have {', '.join(items)} ready for auction."
+            narrative = f"Excellent! We have {', '.join(item.title() for item in items)} ready for auction."
             game_action = {"type": "add_items", "items": items}
             return narrative, game_action
         else:
-            narrative = "No items specified to add. Please use: `Add items: Car, House, Boat`"
+            narrative = "No items specified to add. Please use: `add Car, House, Boat`"
             return narrative, {"type": "no_action"}
 
-    # 3. Start Item Auction (by name or "first" / "next")
-    match = re.match(r"start auction for (?:the first item|the next item|([a-zA-Z0-9\s]+))\b\.?", user_input_lower)
-    if match and current_game_state_for_logic["status"] in ["waiting_for_auction_start", "item_sold"] and current_game_state_for_logic["item_list"]:
+    # 3. Shuffle Items (Simplified)
+    if user_input_lower == "shuffle":
+        if current_game_state_for_logic["item_list"]:
+            narrative = "Auctioneer: A little shake-up in the inventory! Items have been reordered."
+            game_action = {"type": "shuffle_items"}
+            return narrative, game_action
+        else:
+            narrative = "Auctioneer: No items available to shuffle yet. Please `add Car, House` first."
+            return narrative, {"type": "no_action"}
+
+    # 4. Explicit "No Sale" command (already simple)
+    if user_input_lower == "no sale":
+        if current_game_state_for_logic["current_item"]:
+            narrative = f"As there are no valid bids on the '{current_game_state_for_logic['current_item']}', it remains unsold for now. Perhaps it will return later, or we move on."
+            game_action = {"type": "sell_item", "item": current_game_state_for_logic["current_item"], "player": None, "amount": 0}
+            return narrative, game_action
+        else:
+            narrative = "There is no item currently under auction to declare 'no sale'. Please `auction Car` first."
+            return narrative, {"type": "no_action"}
+
+    # 5. Sell Item (Explicit - Simplified: `sell John 30`) - MUST COME BEFORE IMPLICIT SELL
+    # Note: User requested "john 30 sell". I've made it "sell John 30" for consistency with "bid" being an action keyword.
+    match = re.match(r"sell ([\w\s]+) (\d+)\.?$", user_input_lower)
+    if match and current_game_state_for_logic["current_item"]:
+        player_name = match.group(1).strip().title()
+        amount = int(match.group(2))
+        
+        if player_name not in current_game_state_for_logic["participants"]:
+            narrative = f"Player '{player_name}' not recognized. Cannot sell item. Recognized players: {', '.join(current_game_state_for_logic['participants'].keys())}."
+            return narrative, {"type": "no_action"}
+        if amount > current_game_state_for_logic["participants"][player_name]:
+            narrative = f"'{player_name}' cannot afford {amount} credits for '{current_game_state_for_logic['current_item']}'. Sale cancelled."
+            return narrative, {"type": "no_action"}
+        
+        narrative = f"Sold! The '{current_game_state_for_logic['current_item']}' goes to {player_name} for {amount} credits!"
+        game_action = {"type": "sell_item", "item": current_game_state_for_logic["current_item"], "player": player_name, "amount": amount}
+        return narrative, game_action
+    elif match and not current_game_state_for_logic["current_item"]:
+        narrative = "There is no item currently under auction to sell. Please `auction Car` first."
+        return narrative, {"type": "no_action"}
+
+    # 6. Sell Item (Implicit - Simplified: `sell it`) - MUST COME AFTER EXPLICIT SELL
+    if user_input_lower == "sell it":
+        if current_game_state_for_logic["current_item"]:
+            if current_game_state_for_logic["high_bidder"] and current_game_state_for_logic["current_bid"] > 0:
+                player_name = current_game_state_for_logic["high_bidder"]
+                amount = current_game_state_for_logic["current_bid"]
+                narrative = f"Sold! The '{current_game_state_for_logic['current_item']}' goes to {player_name} for {amount} credits!"
+                game_action = {"type": "sell_item", "item": current_game_state_for_logic["current_item"], "player": player_name, "amount": amount}
+            else:
+                narrative = f"As there are no valid bids on the '{current_game_state_for_logic['current_item']}', it remains unsold for now. Perhaps it will return later, or we move on."
+                game_action = {"type": "sell_item", "item": current_game_state_for_logic["current_item"], "player": None, "amount": 0}
+            return narrative, game_action
+        else:
+            narrative = "There is no item currently under auction to sell. Please `auction Car` first."
+            return narrative, {"type": "no_action"}
+
+    # 7. Start Item Auction (Simplified: `auction Car` or `auction first`)
+    match = re.match(r"auction (?:first|next|([a-zA-Z0-9\s]+))\b\.?", user_input_lower)
+    if match and current_game_state_for_logic["status"] != "waiting_for_init" and current_game_state_for_logic["item_list"]:
         item_name_group = match.group(1)
         item_to_start_name = None
 
         if item_name_group: # User specified an item name
             item_to_start_name = item_name_group.strip().title()
-        elif current_game_state_for_logic["item_list"]: # "first item" or "next item"
+        elif current_game_state_for_logic["item_list"]: # "first" or "next"
             item_to_start_name = current_game_state_for_logic["item_list"][0].title() # Use the first available item
 
         if not item_to_start_name:
@@ -93,22 +150,30 @@ def process_user_command(user_input, current_game_state_for_logic):
             return narrative, {"type": "no_action"}
         
         # Check if the requested item is actually in the list (if specified by name)
-        if item_to_start_name in current_game_state_for_logic["item_list"]:
+        # Note: If item_to_start_name was from "first/next", it *is* in item_list by definition.
+        if item_to_start_name in current_game_state_for_logic["item_list"] or \
+           (item_to_start_name.endswith(" (current)") and item_to_start_name.replace(" (current)","") in current_game_state_for_logic["item_list"]): # Check for current item in UI representation
+            # If the item name includes "(current)" from a UI button, strip it for internal logic
+            if item_to_start_name.endswith(" (current)"):
+                item_to_start_name = item_to_start_name.replace(" (current)","")
+
             narrative = f"Our next item up for bid is the magnificent '{item_to_start_name}'! Who will start us off? Bids begin at 1 credit."
             game_action = {"type": "start_item_auction", "item": item_to_start_name}
             return narrative, game_action
         else:
-            narrative = f"Item '{item_to_start_name}' not found in the list of available items. Available: {', '.join(current_game_state_for_logic['item_list'])}. Please use: `Start auction for Car` or `Start auction for the first item`."
+            narrative = f"Item '{item_to_start_name}' not found in the list of available items. Available: {', '.join(current_game_state_for_logic['item_list'])}. Please use: `auction Car` or `auction first`."
             return narrative, {"type": "no_action"}
     elif match and not current_game_state_for_logic["item_list"]:
-        narrative = "There are no items available to auction yet. Please add some first using: `Add items: Car, House`."
+        narrative = "There are no items available to auction yet. Please add some first using: `add Car, House`."
         return narrative, {"type": "no_action"}
     elif match and current_game_state_for_logic["status"] == "bidding":
-        narrative = f"An auction for '{current_game_state_for_logic['current_item']}' is already in progress. Please bid or sell it first using: `John bids 10` or `Sell it!`."
+        narrative = f"An auction for '{current_game_state_for_logic['current_item']}' is already in progress. Please bid or sell it first using: `John bid 10` or `sell it!`."
         return narrative, {"type": "no_action"}
 
-    # 4. Place Bid
-    match = re.match(r"([\w\s]+) bids (\d+)\.?$", user_input_lower)
+
+    # 8. Place Bid (Simplified: `John bid 10`)
+    # Changed from 'John 10' to 'John bid 10' to avoid ambiguity with player names and amounts in other commands.
+    match = re.match(r"([\w\s]+) bid (\d+)\.?$", user_input_lower)
     if match and current_game_state_for_logic["status"] == "bidding":
         player_name = match.group(1).strip().title() # Capitalize for consistency
         amount = int(match.group(2))
@@ -127,56 +192,11 @@ def process_user_command(user_input, current_game_state_for_logic):
         game_action = {"type": "bid", "player": player_name, "amount": amount}
         return narrative, game_action
     elif match and current_game_state_for_logic["status"] != "bidding":
-        narrative = "No item is currently under auction. You need to start an auction first. Use: `Start auction for Car`."
+        narrative = "No item is currently under auction. You need to start an auction first. Use: `auction Car`."
         return narrative, {"type": "no_action"}
 
-    # 5. Explicit "No Sale" command (Must be before general "sell" command to take precedence)
-    if user_input_lower == "no sale":
-        if current_game_state_for_logic["current_item"]:
-            narrative = f"As there are no valid bids on the '{current_game_state_for_logic['current_item']}', it remains unsold for now. Perhaps it will return later, or we move on."
-            game_action = {"type": "sell_item", "item": current_game_state_for_logic["current_item"], "player": None, "amount": 0}
-            return narrative, game_action
-        else:
-            narrative = "There is no item currently under auction to declare 'no sale'. Please `Start auction for Car` first."
-            return narrative, {"type": "no_action"}
-
-    # 6. Sell Item (Implicit or Explicit - now only handles 'sell' variations)
-    # The regex is simplified now that 'no sale' is handled separately.
-    match = re.match(r"sell (?:it|item|the item|current item)(?: to ([\w\s]+) for (\d+))?\.?", user_input_lower)
-    if match and current_game_state_for_logic["current_item"]:
-        target_player_group = match.group(1) # Correct group index for player name
-        target_amount_group = match.group(2) # Correct group index for amount
-
-        if target_player_group and target_amount_group: # Explicit sale to a player for a specified amount
-            player_name = target_player_group.strip().title()
-            amount = int(target_amount_group)
-            if player_name not in current_game_state_for_logic["participants"]:
-                narrative = f"Player '{player_name}' not recognized. Cannot sell item. Recognized players: {', '.join(current_game_state_for_logic['participants'].keys())}."
-                return narrative, {"type": "no_action"}
-            if amount > current_game_state_for_logic["participants"][player_name]:
-                narrative = f"'{player_name}' cannot afford {amount} credits for '{current_game_state_for_logic['current_item']}'. Sale cancelled."
-                return narrative, {"type": "no_action"}
-            
-            narrative = f"Sold! The '{current_game_state_for_logic['current_item']}' goes to {player_name} for {amount} credits!"
-            game_action = {"type": "sell_item", "item": current_game_state_for_logic["current_item"], "player": player_name, "amount": amount}
-            return narrative, game_action
-
-        else: # Implicit sale (to high bidder or unsold if no high bidder)
-            if current_game_state_for_logic["high_bidder"] and current_game_state_for_logic["current_bid"] > 0:
-                player_name = current_game_state_for_logic["high_bidder"]
-                amount = current_game_state_for_logic["current_bid"]
-                narrative = f"Sold! The '{current_game_state_for_logic['current_item']}' goes to {player_name} for {amount} credits!"
-                game_action = {"type": "sell_item", "item": current_game_state_for_logic["current_item"], "player": player_name, "amount": amount}
-            else:
-                narrative = f"As there are no valid bids on the '{current_game_state_for_logic['current_item']}', it remains unsold for now. Perhaps it will return later, or we move on."
-                game_action = {"type": "sell_item", "item": current_game_state_for_logic["current_item"], "player": None, "amount": 0}
-            return narrative, game_action
-    elif match and not current_game_state_for_logic["current_item"]:
-        narrative = "There is no item currently under auction to sell. Please `Start auction for Car` first."
-        return narrative, {"type": "no_action"}
-
-    # 7. Player Passes
-    match = re.match(r"([\w\s]+) passes\.?", user_input_lower)
+    # 9. Player Passes (Simplified: `John pass`)
+    match = re.match(r"([\w\s]+) pass\.?", user_input_lower)
     if match and current_game_state_for_logic["current_item"]:
         player_name = match.group(1).strip().title()
         if player_name not in current_game_state_for_logic["participants"]:
@@ -189,18 +209,8 @@ def process_user_command(user_input, current_game_state_for_logic):
         narrative = "No item is currently under auction to pass on."
         return narrative, {"type": "no_action"}
         
-    # 8. Shuffle Items
-    if user_input_lower == "shuffle items" or user_input_lower == "shuffle the items":
-        if current_game_state_for_logic["item_list"]:
-            narrative = "Auctioneer: A little shake-up in the inventory! Items have been reordered."
-            game_action = {"type": "shuffle_items"}
-            return narrative, game_action
-        else:
-            narrative = "Auctioneer: No items available to shuffle yet. Please `Add items: Car, House` first."
-            return narrative, {"type": "no_action"}
-
     # If no specific command is matched
-    return f"Auctioneer: I didn't understand your command: '{user_input}'. Please try again with a clear instruction, or refer to the 'Command Assistant' for examples. Common commands include: `John bids 10`, `Sell it!`, `Start auction for Car`, `No sale`.", {"type": "no_action"}
+    return f"Auctioneer: I didn't understand your command: '{user_input}'. Please try again with a clear instruction, or refer to the 'Command Assistant' for examples. Common commands include: `John bid 10`, `sell it!`, `auction Car`, `no sale`.", {"type": "no_action"}
 
 
 # --- Game Logic Functions ---
@@ -208,19 +218,32 @@ def process_user_command(user_input, current_game_state_for_logic):
 def apply_game_action(action):
     """
     Applies a parsed GAME_ACTION to the global game_state.
+    Pushes current state to history BEFORE modification.
     """
     global game_state
+    global game_state_history
 
     action_type = action.get("type")
 
-    # Simple hash to detect direct action repetitions from UI buttons,
-    # but still allow complex chat commands that *might* lead to the same state
-    # or follow-up actions like starting a new auction.
+    # For actions that modify the game state, push a deep copy to history
+    # 'no_action' and 'pass' (which currently has no actual state change in apply_game_action)
+    # are generally safe to skip for history, but including them for robustness is also okay.
+    # For now, let's include all non-trivial actions.
+    if action_type != "no_action":
+        # Ensure we don't store the current state if it's identical to the last one in history
+        # (e.g., if a user keeps clicking "start next auction" for an already active auction)
+        if not game_state_history or \
+           json.dumps(game_state, sort_keys=True) != json.dumps(game_state_history[-1], sort_keys=True):
+            game_state_history.append(copy.deepcopy(game_state))
+            if len(game_state_history) > MAX_HISTORY_SIZE:
+                game_state_history.pop(0) # Remove oldest state if history size exceeds limit
+        
+        # Reset last_processed_action_hash for new actions
+        game_state["last_processed_action_hash"] = None
+
+    # Handle duplicate action hash for actual state-changing commands
     action_hash = hash(json.dumps(action, sort_keys=True))
     if action_hash == game_state["last_processed_action_hash"] and action_type not in ["pass", "no_action"]:
-        # Only prevent exact, non-narrative-only actions from being reprocessed immediately.
-        # Pass/no_action can be repeated without major state changes, and
-        # start_item_auction might be triggered multiple times if the user clicks the button.
         print(f"Skipping duplicate action: {action_type}")
         return "Duplicate action skipped."
     game_state["last_processed_action_hash"] = action_hash
@@ -249,7 +272,7 @@ def apply_game_action(action):
         # Update status based on current game flow
         if game_state["status"] == "waiting_for_items":
             game_state["status"] = "waiting_for_auction_start"
-            game_state["chat_log"].append({"sender": "Auctioneer", "message": f"Excellent, items have been added! You can now use the 'Start Next Auction' button or type 'Start auction for the first item'."})
+            game_state["chat_log"].append({"sender": "Auctioneer", "message": f"Excellent, items have been added! You can now use the 'Auction Next Item' button or type 'auction first'."})
         game_state["chat_log"].append({"sender": "System", "message": f"Items added: {', '.join(items_to_add)}."})
         return f"Added {len(items_to_add)} items."
 
@@ -401,7 +424,8 @@ def process_chat_route():
     return jsonify({
         "success": True,
         "narrative": narrative, # Frontend can still use this for confirmation, but chat_log is primary
-        "game_state": game_state
+        "game_state": game_state,
+        "history_available": len(game_state_history) > 0 # Indicate if undo is available
     })
 
 @app.route('/upload_items', methods=['POST'])
@@ -438,7 +462,8 @@ def upload_items():
             return jsonify({
                 "success": True,
                 "message": f"{len(items)} items uploaded successfully.",
-                "game_state": game_state 
+                "game_state": game_state,
+                "history_available": len(game_state_history) > 0
             })
 
         except Exception as e:
@@ -453,13 +478,43 @@ def reset_game():
     Resets the entire game state to its initial values.
     """
     global game_state
+    global game_state_history
     game_state = get_initial_game_state()
+    game_state_history = [] # Clear history on full reset
     game_state["chat_log"].append({"sender": "System", "message": "Game has been reset. Start a new auction!"})
     return jsonify({
         "success": True,
         "message": "Game state reset.",
-        "game_state": game_state
+        "game_state": game_state,
+        "history_available": len(game_state_history) > 0
     })
+
+@app.route('/undo_last_action', methods=['POST'])
+def undo_last_action():
+    """
+    Undoes the last state-changing action by restoring from history.
+    """
+    global game_state
+    global game_state_history
+
+    if not game_state_history:
+        game_state["chat_log"].append({"sender": "System", "message": "No previous state to undo to."})
+        return jsonify({"success": False, "message": "No previous state available.", "game_state": game_state, "history_available": False}), 400
+
+    previous_game_state = game_state_history.pop()
+    game_state = previous_game_state
+    game_state["chat_log"].append({"sender": "System", "message": "Last action has been undone."})
+    
+    # After undo, ensure last_processed_action_hash is cleared to allow immediate re-processing
+    game_state["last_processed_action_hash"] = None 
+
+    return jsonify({
+        "success": True,
+        "message": "Last action undone.",
+        "game_state": game_state,
+        "history_available": len(game_state_history) > 0
+    })
+
 
 @app.route('/start_next_auction_action', methods=['POST'])
 def start_next_auction_action():
@@ -482,15 +537,15 @@ def start_next_auction_action():
                 game_state["chat_log"][-1]["message"].endswith(action_result)):
             game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result}"})
         
-        return jsonify({"success": True, "game_state": game_state})
+        return jsonify({"success": True, "game_state": game_state, "history_available": len(game_state_history) > 0})
     elif game_state["status"] == "bidding":
         narrative = f"Auctioneer: An auction for '{game_state['current_item']}' is already in progress. Please bid or sell it first."
         game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": False, "message": narrative, "game_state": game_state}), 400
+        return jsonify({"success": False, "message": narrative, "game_state": game_state, "history_available": len(game_state_history) > 0}), 400
     else:
         narrative = "Auctioneer: No items available to start an auction, or game not ready. Please add items first, or initialize the game."
         game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": False, "message": narrative, "game_state": game_state}), 400
+        return jsonify({"success": False, "message": narrative, "game_state": game_state, "history_available": len(game_state_history) > 0}), 400
 
 @app.route('/sell_current_item_action', methods=['POST'])
 def sell_current_item_action():
@@ -517,11 +572,11 @@ def sell_current_item_action():
                 game_state["chat_log"][-1]["message"].endswith(action_result)):
             game_state["chat_log"].append({"sender": "System", "message": f"Action processed: {action_result}"})
 
-        return jsonify({"success": True, "game_state": game_state})
+        return jsonify({"success": True, "game_state": game_state, "history_available": len(game_state_history) > 0})
     else:
         narrative = "Auctioneer: No item currently under auction to sell."
         game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": False, "message": narrative, "game_state": game_state}), 400
+        return jsonify({"success": False, "message": narrative, "game_state": game_state, "history_available": len(game_state_history) > 0}), 400
 
 @app.route('/shuffle_items_action', methods=['POST'])
 def shuffle_items_action():
@@ -530,15 +585,20 @@ def shuffle_items_action():
     """
     global game_state
     if game_state["item_list"]:
+        # Push state to history before shuffling
+        game_state_history.append(copy.deepcopy(game_state))
+        if len(game_state_history) > MAX_HISTORY_SIZE:
+            game_state_history.pop(0)
+
         random.shuffle(game_state["item_list"])
         game_state["chat_log"].append({"sender": "System", "message": "The remaining items have been shuffled!"})
         narrative = "Auctioneer: A little shake-up in the inventory! Items have been reordered."
         game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": True, "game_state": game_state})
+        return jsonify({"success": True, "game_state": game_state, "history_available": len(game_state_history) > 0})
     else:
         narrative = "Auctioneer: No items available to shuffle yet."
         game_state["chat_log"].append({"sender": "Auctioneer", "message": narrative})
-        return jsonify({"success": False, "message": narrative, "game_state": game_state}), 400
+        return jsonify({"success": False, "message": narrative, "game_state": game_state, "history_available": len(game_state_history) > 0}), 400
 
 @app.route('/set_inventory_sort', methods=['POST'])
 def set_inventory_sort():
@@ -552,9 +612,14 @@ def set_inventory_sort():
     if sort_key not in ['name', 'price'] or sort_order not in ['asc', 'desc']:
         return jsonify({"success": False, "message": "Invalid sort key or order."}), 400
 
+    # Sort preference isn't a core game action, but for consistency, we'll push to history.
+    game_state_history.append(copy.deepcopy(game_state))
+    if len(game_state_history) > MAX_HISTORY_SIZE:
+        game_state_history.pop(0)
+
     game_state["player_inventory_sort"] = {"key": sort_key, "order": sort_order}
     game_state["chat_log"].append({"sender": "System", "message": f"Player inventories will now be sorted by {sort_key} ({sort_order})."})
-    return jsonify({"success": True, "game_state": game_state})
+    return jsonify({"success": True, "game_state": game_state, "history_available": len(game_state_history) > 0})
 
 
 @app.route('/get_game_state', methods=['GET'])
@@ -562,7 +627,7 @@ def get_game_state_route():
     """
     Returns the current full game state. Useful for initial load and periodic updates.
     """
-    return jsonify(game_state)
+    return jsonify(game_state, {"history_available": len(game_state_history) > 0})
 
 # --- Embedded HTML, CSS, JavaScript ---
 
@@ -593,6 +658,8 @@ HTML_CONTENT = """
             --auction-button-hover: #512DA8; /* Darker Purple */
             --sort-button-color: #555;
             --sort-button-hover: #333;
+            --undo-button-color: #FF5722; /* Deep Orange */
+            --undo-button-hover: #E64A19;
         }
 
         /* --- Global Resets & Body Setup --- */
@@ -683,9 +750,7 @@ HTML_CONTENT = """
             display: flex;
             flex-direction: column; 
             border: 1px solid var(--border-color);
-            /* height: 100%; removed, grid cells take height */
             box-sizing: border-box;
-            /* REVERTED: Add overflow-y: auto back to main panels */
             overflow-y: auto; 
             overflow-x: hidden; 
             min-height: 0; /* Crucial for flex/grid items */
@@ -702,27 +767,21 @@ HTML_CONTENT = """
             flex-shrink: 0; /* Ensures sections take their natural size */
             display: flex; 
             flex-direction: column; 
-            /* REMOVED: min-height: 0; from .panel-section to allow content to push height */
-            overflow: hidden; /* Hide any overflow within the section itself, but not cause inner scrolling */
+            overflow: hidden; 
         }
         .panel-section:last-child {
             margin-bottom: 0;
         }
 
-        /* REMOVED: Specific override for center panel sections to allow them to flex */
-        /* .center-panel .panel-section { flex: 1; } */ 
-        /* The above is removed as the parent .center-panel will now scroll. */
-
-
         /* Left Panel specific layout for action buttons/upload */
         .left-panel .panel-section {
-            flex-shrink: 0; /* Most sections on the left are fixed height */
+            flex-shrink: 0; 
         }
         .left-panel .game-management-section {
-            margin-top: auto; /* Pushes reset button to the bottom */
+            margin-top: auto; 
         }
 
-        /* Specific section styles (these are flex-shrink: 0 children of .panel-section) */
+        /* Specific section styles */
         .game-status-section {
             margin-bottom: 20px;
         }
@@ -781,32 +840,28 @@ HTML_CONTENT = """
         }
         .auction-controls-section button,
         .game-management-section button {
-            width: calc(100% - 10px); /* Adjust width to fit container with padding */
-            margin: 5px auto; /* Vertical spacing between buttons and center */
+            width: calc(100% - 10px); 
+            margin: 5px auto; 
             max-width: 300px;
         }
-        .game-management-section button { /* Apply specific margin to reset button */
+        .game-management-section button { 
              margin-top: 15px;
         }
 
 
         /* --- Scrollable List Wrappers (Content within .panel-section) --- */
         .scrollable-list-wrapper {
-            /* REVERTED: Remove flex and overflow from here, parent panel will scroll */
-            /* flex: 1; */ 
-            /* overflow-y: auto; */ 
             border: 1px solid var(--border-color);
             border-radius: 8px;
             background-color: #fdfdfd;
             padding: 10px;
             box-shadow: inset 0 1px 3px rgba(0,0,0,0.03);
-            /* REMOVED: min-height: 0; from here */
-            margin-bottom: 10px; /* Space between scrollable list and next panel section */
+            margin-bottom: 10px; 
             min-width: 0; 
             word-wrap: break-word; 
         }
         .panel-section:last-child .scrollable-list-wrapper {
-            margin-bottom: 0; /* No margin-bottom for the last one */
+            margin-bottom: 0; 
         }
         
 
@@ -850,7 +905,7 @@ HTML_CONTENT = """
         .player-inventory-item .item-price {
             font-weight: 500;
             color: var(--secondary-color);
-            margin-left: auto; /* Pushes price to the right */
+            margin-left: auto; 
         }
 
         .player-budget {
@@ -865,8 +920,8 @@ HTML_CONTENT = """
         
         /* Inventory Sort and Search Controls */
         .inventory-controls {
-            flex-shrink: 0; /* Don't let controls shrink */
-            margin-bottom: 10px; /* Space before the actual list */
+            flex-shrink: 0; 
+            margin-bottom: 10px; 
         }
         .inventory-controls .search-input {
             width: 100%;
@@ -875,7 +930,7 @@ HTML_CONTENT = """
             border: 1px solid var(--border-color);
             border-radius: 6px;
             font-size: 0.95em;
-            box-sizing: border-box; /* Include padding/border in width */
+            box-sizing: border-box; 
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
         .inventory-controls .search-input:focus {
@@ -887,8 +942,8 @@ HTML_CONTENT = """
         .inventory-sort-controls {
             display: flex;
             gap: 5px;
-            flex-wrap: wrap; /* Allow wrapping on small screens */
-            justify-content: center; /* Center buttons */
+            flex-wrap: wrap; 
+            justify-content: center; 
         }
         .inventory-sort-controls button {
             flex: 1;
@@ -899,7 +954,7 @@ HTML_CONTENT = """
             color: white;
             border-radius: 5px;
             box-shadow: none;
-            margin: 2px; /* Small margin for wrap */
+            margin: 2px; 
         }
         .inventory-sort-controls button:hover {
             background-color: var(--sort-button-hover);
@@ -912,9 +967,7 @@ HTML_CONTENT = """
 
         /* --- Right Panel (Chat Interface & Command Assistant) --- */
         .chat-log {
-            /* REVERTED: Remove flex and overflow from here, parent panel will scroll */
-            /* flex: 1; */ 
-            /* overflow-y: auto; */ 
+            overflow-y: auto; 
             overflow-x: hidden; 
             border: 1px solid var(--border-color);
             border-radius: 8px;
@@ -924,7 +977,7 @@ HTML_CONTENT = """
             display: flex;
             flex-direction: column; 
             box-shadow: inset 0 1px 3px rgba(0,0,0,0.03);
-            min-height: 150px; /* Min-height for chat log, allows it to shrink but not disappear */
+            min-height: 150px; 
             scroll-behavior: smooth;
             word-wrap: break-word; 
         }
@@ -945,7 +998,7 @@ HTML_CONTENT = """
             margin-right: 5px;
         }
         .chat-message.You {
-            background-color: #e8f5e9; /* Light green */
+            background-color: #e8f5e9; 
             align-self: flex-end;
             text-align: right;
             border-bottom-right-radius: 0;
@@ -954,7 +1007,7 @@ HTML_CONTENT = """
             color: var(--accent-color);
         }
         .chat-message.Auctioneer {
-            background-color: #e3f2fd; /* Light blue */
+            background-color: #e3f2fd; 
             align-self: flex-start;
             text-align: left;
             border-bottom-left-radius: 0;
@@ -963,7 +1016,7 @@ HTML_CONTENT = """
             color: var(--primary-color);
         }
         .chat-message.System {
-            background-color: #fffde7; /* Light yellow */
+            background-color: #fffde7; 
             align-self: center;
             text-align: center;
             color: #555;
@@ -979,8 +1032,8 @@ HTML_CONTENT = """
         .chat-input {
             display: flex;
             padding-top: 15px;
-            flex-shrink: 0; /* Don't let chat input shrink */
-            margin-top: auto; /* Pushes chat input and assistant to the bottom */
+            flex-shrink: 0; 
+            margin-top: auto; 
             border-top: 1px solid var(--border-color);
             background-color: var(--background-medium); 
             padding-bottom: 5px; 
@@ -1048,6 +1101,14 @@ HTML_CONTENT = """
         .auction-control-button:hover {
             background-color: var(--auction-button-hover);
         }
+        .undo-button {
+            background-color: var(--undo-button-color);
+            margin-bottom: 10px; /* Space between undo and reset */
+        }
+        .undo-button:hover {
+            background-color: var(--undo-button-hover);
+        }
+
 
         .command-assistant {
             margin-top: 20px;
@@ -1055,10 +1116,10 @@ HTML_CONTENT = """
             padding: 15px;
             border-radius: 8px;
             border: 1px solid #e0e0e0;
-            flex-shrink: 0; /* Ensures it takes its natural height and doesn't get squashed */
+            flex-shrink: 0; 
         }
         .command-assistant h3 {
-            color: #3f51b5; /* Indigo */
+            color: #3f51b5; 
             border-bottom: 1px solid #c5cae9;
             padding-bottom: 8px;
             margin-bottom: 15px;
@@ -1083,9 +1144,9 @@ HTML_CONTENT = """
             border-radius: 4px;
             font-family: 'Courier New', Courier, monospace;
             font-size: 0.85em;
-            color: #c2185b; /* Pink-purple */
-            cursor: pointer; /* Indicate it's clickable */
-            user-select: all; /* Allow easy selection */
+            color: #c2185b; 
+            cursor: pointer; 
+            user-select: all; 
             transition: background-color 0.2s ease;
         }
         .command-assistant code:hover {
@@ -1137,7 +1198,6 @@ HTML_CONTENT = """
             .right-panel {
                 grid-area: chat;
             }
-            /* .chat-log { min-height: 300px; } - removed */
         }
 
         @media (max-width: 900px) {
@@ -1158,9 +1218,8 @@ HTML_CONTENT = """
             .left-panel, .center-panel, .right-panel {
                 padding: 15px;
                 height: auto; 
-                overflow-y: visible; /* Prevent scrollbars on mobile if content fits */
+                overflow-y: visible; 
             }
-            /* .chat-log { min-height: 250px; } - removed */
             .chat-input {
                 padding-top: 10px;
                 padding-bottom: 0;
@@ -1179,7 +1238,6 @@ HTML_CONTENT = """
                 height: auto; 
                 overflow-y: visible; 
             }
-            /* .chat-log { min-height: 200px; } - removed */
         }
     </style>
 </head>
@@ -1202,7 +1260,7 @@ HTML_CONTENT = """
             
             <div class="panel-section auction-controls-section">
                 <h3>Auction Actions</h3>
-                <button id="start-auction-btn" class="auction-control-button" onclick="startNextAuction()" disabled>Start Next Auction</button>
+                <button id="start-auction-btn" class="auction-control-button" onclick="startNextAuction()" disabled>Auction Next Item</button>
                 <button id="sell-item-btn" class="auction-control-button" onclick="sellCurrentItem()" disabled>Sell Current Item</button>
                 <button id="shuffle-items-btn" class="auction-control-button" onclick="shuffleItems()" disabled>Shuffle Remaining Items</button>
             </div>
@@ -1215,6 +1273,7 @@ HTML_CONTENT = """
             </div>
 
             <div class="panel-section game-management-section">
+                <button id="undo-btn" class="undo-button" onclick="undoLastAction()" disabled>Undo Last Action</button>
                 <button onclick="resetGame()" class="reset-game-button">Start New Game / Reset</button>
             </div>
         </div>
@@ -1281,14 +1340,14 @@ HTML_CONTENT = """
             <div class="command-assistant panel-section">
                 <h3>Command Assistant</h3>
                 <ul>
-                    <li><strong>Start Game:</strong> <code>Start a new auction game with players John, Jane, Mike, and a budget of 100 for everyone.</code></li>
-                    <li><strong>Add Items:</strong> <code>Add items: Car, House, Boat</code></li>
-                    <li><strong>Start Auction:</strong> <code>Start auction for Car</code> or <code>Start auction for the first item</code></li>
-                    <li><strong>Place Bid:</strong> <code>John bids 10</code> (replace 'John' and '10')</li>
-                    <li><strong>Sell Item:</strong> <code>Sell it!</code> (sells to high bidder) or <code>Sell it to John for 50</code></li>
-                    <li><strong>No Sale:</strong> <code>No sale</code></li>
-                    <li><strong>Pass:</strong> <code>Jane passes</code> (replace 'Jane')</li>
-                    <li><strong>Shuffle:</strong> <code>Shuffle items</code></li>
+                    <li><strong>Start Game:</strong> <code>start game players John, Jane budget 100</code></li>
+                    <li><strong>Add Items:</strong> <code>add Car, House, Boat</code></li>
+                    <li><strong>Start Auction:</strong> <code>auction Car</code> or <code>auction first</code></li>
+                    <li><strong>Place Bid:</strong> <code>John bid 10</code> (replace 'John' and '10')</li>
+                    <li><strong>Sell Item:</strong> <code>sell it</code> (sells to high bidder) or <code>sell John 50</code></li>
+                    <li><strong>No Sale:</strong> <code>no sale</code></li>
+                    <li><strong>Pass:</strong> <code>Jane pass</code> (replace 'Jane')</li>
+                    <li><strong>Shuffle:</strong> <code>shuffle</code></li>
                 </ul>
             </div>
         </div>
@@ -1339,12 +1398,13 @@ HTML_CONTENT = """
             try {
                 const response = await fetch('/get_game_state');
                 const data = await response.json();
-                currentGameState = data; // Store the state
-                currentInventorySort = data.player_inventory_sort || { key: 'name', order: 'asc' }; // Load sort from state
-                updateUI(data);
+                currentGameState = data[0]; // State is now at index 0, history_available at 1
+                const historyAvailable = data[1].history_available;
+
+                currentInventorySort = currentGameState.player_inventory_sort || { key: 'name', order: 'asc' }; 
+                updateUI(currentGameState, historyAvailable);
             } catch (error) {
                 console.error('Error fetching game state:', error);
-                // Optionally display a user-friendly error message
                 addChatMessage('System Error', 'Could not connect to the server. Please refresh.', 'System');
             }
         }
@@ -1367,10 +1427,11 @@ HTML_CONTENT = """
             
             if (data.success) {
                 currentGameState = data.game_state; // Update stored state
-                updateUI(data.game_state);
+                updateUI(data.game_state, data.history_available);
             } else {
                 console.error('Error processing chat:', data.message);
                 addChatMessage('System Error', data.message, 'System');
+                updateUI(data.game_state, data.history_available); // Update UI even on error to show latest state/chat
             }
         }
 
@@ -1395,7 +1456,7 @@ HTML_CONTENT = """
 
                 if (data.success) {
                     currentGameState = data.game_state; // Update stored state
-                    updateUI(data.game_state);
+                    updateUI(data.game_state, data.history_available);
                     addChatMessage('System', data.message, 'System');
                 } else {
                     alert('Error uploading items: ' + data.message);
@@ -1423,7 +1484,7 @@ HTML_CONTENT = """
                 const data = await response.json();
                 if (data.success) {
                     currentGameState = data.game_state; // Update stored state
-                    updateUI(data.game_state);
+                    updateUI(data.game_state, data.history_available);
                     // Clear existing chat log and then re-add initial messages
                     const chatLog = document.getElementById('chat-log');
                     chatLog.innerHTML = '';
@@ -1440,6 +1501,37 @@ HTML_CONTENT = """
             }
         }
 
+        async function undoLastAction() {
+            if (!confirm('Are you sure you want to undo the last action?')) {
+                return;
+            }
+            try {
+                const response = await fetch('/undo_last_action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const data = await response.json();
+                if (data.success) {
+                    currentGameState = data.game_state;
+                    updateUI(data.game_state, data.history_available);
+                    // Rebuild chat log for a full revert
+                    const chatLog = document.getElementById('chat-log');
+                    chatLog.innerHTML = '';
+                    for (const chatEntry of data.game_state.chat_log) {
+                        addChatMessage(chatEntry.sender, chatEntry.message, chatEntry.sender);
+                    }
+                    chatLog.scrollTop = chatLog.scrollHeight;
+                } else {
+                    alert('Failed to undo action: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error undoing action:', error);
+                alert('Network error during undo.');
+            }
+        }
+
+
         async function startNextAuction() {
             try {
                 const response = await fetch('/start_next_auction_action', {
@@ -1449,8 +1541,8 @@ HTML_CONTENT = """
                 });
                 const data = await response.json();
                 if (data.success) {
-                    currentGameState = data.game_state; // Update stored state
-                    updateUI(data.game_state);
+                    currentGameState = data.game_state; 
+                    updateUI(data.game_state, data.history_available);
                 } else {
                     alert('Error starting auction: ' + data.message);
                 }
@@ -1469,8 +1561,8 @@ HTML_CONTENT = """
                 });
                 const data = await response.json();
                 if (data.success) {
-                    currentGameState = data.game_state; // Update stored state
-                    updateUI(data.game_state);
+                    currentGameState = data.game_state; 
+                    updateUI(data.game_state, data.history_available);
                 } else {
                     alert('Error selling item: ' + data.message);
                 }
@@ -1489,8 +1581,8 @@ HTML_CONTENT = """
                 });
                 const data = await response.json();
                 if (data.success) {
-                    currentGameState = data.game_state; // Update stored state
-                    updateUI(data.game_state);
+                    currentGameState = data.game_state; 
+                    updateUI(data.game_state, data.history_available);
                 } else {
                     alert('Error shuffling items: ' + data.message);
                 }
@@ -1509,9 +1601,9 @@ HTML_CONTENT = """
                 });
                 const data = await response.json();
                 if (data.success) {
-                    currentGameState = data.game_state; // Update stored state
-                    currentInventorySort = { key: key, order: order }; // Update local preference
-                    updateUI(data.game_state); // Re-render UI with new sort
+                    currentGameState = data.game_state; 
+                    currentInventorySort = { key: key, order: order }; 
+                    updateUI(data.game_state, data.history_available); 
                 } else {
                     console.error('Error setting inventory sort:', data.message);
                 }
@@ -1526,10 +1618,10 @@ HTML_CONTENT = """
             div.className = `chat-message ${type}`;
             div.innerHTML = `<strong>${sender}:</strong> ${message}`;
             chatLog.appendChild(div);
-            chatLog.scrollTop = chatLog.scrollHeight; // Scroll to the latest message
+            chatLog.scrollTop = chatLog.scrollHeight; 
         }
 
-        function updateUI(gameState) {
+        function updateUI(gameState, historyAvailable = false) {
             // Update Status Message
             const statusMessageDiv = document.getElementById('status-message');
             let statusText = "Game Status: ";
@@ -1543,7 +1635,7 @@ HTML_CONTENT = """
                 statusClass = "warning";
             } else if (gameState.status === "waiting_for_auction_start" || gameState.status === "item_sold") {
                 statusText += "Items added. Ready to start next auction.";
-                statusClass = "info"; // Changed to info, as it's ready, not necessarily waiting for user input as much.
+                statusClass = "info"; 
             } else if (gameState.status === "bidding") {
                 statusText += `Auction for '${gameState.current_item}' is active.`;
                 statusClass = "success";
@@ -1563,10 +1655,12 @@ HTML_CONTENT = """
             const startAuctionBtn = document.getElementById('start-auction-btn');
             const sellItemBtn = document.getElementById('sell-item-btn');
             const shuffleItemsBtn = document.getElementById('shuffle-items-btn');
+            const undoBtn = document.getElementById('undo-btn');
 
             startAuctionBtn.disabled = !gameState.item_list.length || gameState.status === "bidding" || gameState.status === "game_over";
             sellItemBtn.disabled = !gameState.current_item || gameState.status !== "bidding";
             shuffleItemsBtn.disabled = !gameState.item_list.length;
+            undoBtn.disabled = !historyAvailable;
 
 
             // Update Participants List
@@ -1590,19 +1684,16 @@ HTML_CONTENT = """
             const itemsRemainingCountSpan = document.getElementById('items-remaining-count');
             itemsRemainingList.innerHTML = '';
             
-            // Create a temporary list that includes the current item if an auction is active
             let displayItems = [...gameState.item_list];
             if (gameState.current_item && gameState.status === "bidding") {
                 const currentItemIndex = displayItems.indexOf(gameState.current_item);
                 if (currentItemIndex > -1) {
-                    // Temporarily remove from displayItems so it's not double-listed if still in item_list
-                    // The backend removes it upon sell, so this branch handles the "currently auctioning" display
                     displayItems.splice(currentItemIndex, 1); 
                 }
                 displayItems.unshift(gameState.current_item + " (current)"); 
             }
 
-            itemsRemainingCountSpan.textContent = `(${gameState.item_list.length})`; // Actual remaining count of items not yet auctioned
+            itemsRemainingCountSpan.textContent = `(${gameState.item_list.length})`; 
 
             if (displayItems.length === 0) {
                 itemsRemainingList.innerHTML = '<li>No items remaining.</li>';
@@ -1632,27 +1723,25 @@ HTML_CONTENT = """
             });
 
             for (const player in gameState.player_items) {
-                // Filter items first based on search term
                 const filteredItems = gameState.player_items[player].filter(item => 
                     item.name.toLowerCase().includes(currentInventorySearchTerm)
                 );
 
-                const playerItems = [...filteredItems]; // Create a copy to sort
+                const playerItems = [...filteredItems]; 
                 
-                // Apply sorting
                 playerItems.sort((a, b) => {
                     let compareA, compareB;
                     if (currentInventorySort.key === 'name') {
                         compareA = a.name.toLowerCase();
                         compareB = b.name.toLowerCase();
-                    } else { // 'price'
+                    } else { 
                         compareA = a.price;
                         compareB = b.price;
                     }
 
                     if (compareA < compareB) return currentInventorySort.order === 'asc' ? -1 : 1;
                     if (compareA > compareB) return currentInventorySort.order === 'asc' ? 1 : -1;
-                    return 0; // names or prices are equal
+                    return 0; 
                 });
 
                 if (playerItems.length > 0) {
@@ -1664,12 +1753,12 @@ HTML_CONTENT = """
                     playerItems.forEach(item => {
                         const itemLi = document.createElement('li');
                         itemLi.className = 'player-inventory-item';
-                        itemLi.innerHTML = `${item.name} <span class="item-price">(${item.price} credits)</span>`; // Display name and price
+                        itemLi.innerHTML = `${item.name} <span class="item-price">(${item.price} credits)</span>`; 
                         playerInventoriesList.appendChild(itemLi);
                     });
                 }
             }
-            if (!hasItemsBought && !currentInventorySearchTerm) { // Only show "no items" if no search term
+            if (!hasItemsBought && !currentInventorySearchTerm) { 
                 playerInventoriesList.innerHTML = '<li>No items purchased yet.</li>';
             } else if (!hasItemsBought && currentInventorySearchTerm) {
                  playerInventoriesList.innerHTML = `<li>No items found matching "${currentInventorySearchTerm}".</li>`;
@@ -1682,7 +1771,6 @@ HTML_CONTENT = """
             if (gameState.auction_history.length === 0) {
                 auctionHistoryList.innerHTML = '<li>No items sold yet.</li>';
             } else {
-                // Display in reverse order (most recent first)
                 [...gameState.auction_history].reverse().forEach(entry => {
                     const li = document.createElement('li');
                     li.textContent = entry;
@@ -1692,22 +1780,19 @@ HTML_CONTENT = """
 
             // Update Chat Log
             const chatLog = document.getElementById('chat-log');
-            // Rebuild chat log only if its content has changed by comparing last message
             const lastLogMessage = gameState.chat_log.length > 0 ? gameState.chat_log[gameState.chat_log.length - 1] : null;
             const lastDisplayedMessageDiv = chatLog.lastElementChild;
             const lastDisplayedMessageText = lastDisplayedMessageDiv ? lastDisplayedMessageDiv.textContent : null;
 
-            // Check if the actual last message in game_state.chat_log is already the last displayed message
-            // This is a heuristic to prevent unnecessary full redraws of the chat log
             if (!lastLogMessage || !lastDisplayedMessageText || 
                 !lastDisplayedMessageText.includes(lastLogMessage.message)
             ) {
-                chatLog.innerHTML = ''; // Clear only if there's a difference
+                chatLog.innerHTML = ''; 
                 for (const chatEntry of gameState.chat_log) {
                     addChatMessage(chatEntry.sender, chatEntry.message, chatEntry.sender);
                 }
             }
-            chatLog.scrollTop = chatLog.scrollHeight; // Ensure it scrolls to bottom after full rebuild
+            chatLog.scrollTop = chatLog.scrollHeight; 
         }
     </script>
 </body>
@@ -1718,13 +1803,9 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
 
-----------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------
 
-I want to add an undo feature which will let the user undo the last option if it was mistakenly done or if the item was sold at a lower price or at a higher price. Some kind of mistake was done, the undo feature will let it rectify.
+When a large dataset is uploaded into this website, then the problem that is happening is after playing the auction for a long time, it is restarting and all the data is getting removed and the website is kind of crashing. So, what is going wrong there? Please find the issue there. The website is hosted on Render, so it is running as a Python code, so nrender for this website. As you can see clearly, the problem is about the data not staying and it is going away in a flash for a large dataset. In the chat box, the chat history is coming in such a way that whenever I push a new entry, new action to make the chat do, the chat history is appearing from start to end and then showing the new action or new message. Why is it happening? What is the reason for it happening that way? The chat should show one by one, right? Up until this point, whatever message that was there, the next message will show right away. But instead of showing the message right away, the whole chat history is going for a spin from beginning to end and then showing the message. Why does that happen? So, I want to fix all these issues. Help me.
 
-I want the option to be as simple as possible for a user to manage. It should be awesomely easy and smooth in case of handling and managing the option. It will be very easy with all of its vast level of functionalities intact. It must be easier to handle the option overall and everything.
-
-I want to make the selling of the item command to be just like this, just like the below example, "john 30 sell" This is an example of the commands I want you to modify, and please modify the commands to be as simple as this.
-
-Modify all the commands to be as simple as where the user has to write very few lines and the website will understand.
+My main request to you is that I want to play this game peacefully and without any problems. So look for any other issues. If you find them, fix them. I want to play this game seamlessly and smoothly and have fun. And I don't want to lose any data. I don't know why the data is being lost. That is the biggest pain in the ass for me.
 
